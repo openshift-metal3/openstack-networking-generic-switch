@@ -70,3 +70,16 @@ class GenericSwitchNotSupported(GenericSwitchException):
 class GenericSwitchSecurityGroupRuleNotSupported(GenericSwitchNotSupported):
     message = _("Security group rule is not supported on the %(switch)s. "
                 "%(error)s")
+
+
+class GenericSwitchNetconfError(GenericSwitchException):
+    message = _("NETCONF operation failed on device %(device)s: %(error)s")
+
+
+class GenericSwitchNetconfConnectError(GenericSwitchException):
+    message = _("Failed to connect to NETCONF device %(device)s: %(error)s")
+
+
+class GenericSwitchNetconfLockDenied(GenericSwitchException):
+    message = _("Access to the requested lock is denied because the "
+                "lock is currently held by another entity.")

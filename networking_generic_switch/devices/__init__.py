@@ -62,7 +62,13 @@ NGS_INTERNAL_OPTS = [
     {'name': 'ngs_allowed_vlans'},
     {'name': 'ngs_allowed_ports'},
     # Require security groups to be enabled on a per-device basis
-    {'name': 'ngs_security_groups_enabled', 'default': False}
+    {'name': 'ngs_security_groups_enabled', 'default': False},
+    # Force NETCONF datastore target ('candidate' or 'running').
+    # Unset (default) auto-detects from server capabilities.
+    {'name': 'ngs_netconf_target'},
+    # XML config payload sent via edit-config to the running datastore
+    # to persist configuration.
+    {'name': 'ngs_netconf_save_config'},
 ]
 
 EM_SEMAPHORE = 'ngs_device_manager'
