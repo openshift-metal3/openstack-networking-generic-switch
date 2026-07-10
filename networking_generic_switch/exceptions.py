@@ -83,3 +83,8 @@ class GenericSwitchNetconfConnectError(GenericSwitchException):
 class GenericSwitchNetconfLockDenied(GenericSwitchException):
     message = _("Access to the requested lock is denied because the "
                 "lock is currently held by another entity.")
+
+
+class GenericSwitchNetconfOperationFailed(GenericSwitchException):
+    message = _("The NETCONF device returned operation-failed. "
+                "The request will be retried.")

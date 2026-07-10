@@ -24,7 +24,8 @@ sys.path.insert(0, os.path.join(os.path.abspath('.'), '_exts'))
 extensions = [
     'sphinxcontrib.apidoc',
     'openstackdocstheme',
-    'netmiko_device_commands'
+    'netmiko_device_commands',
+    'netconf_device_commands',
 ]
 
 # openstackdocstheme options

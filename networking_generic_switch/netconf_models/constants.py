@@ -58,6 +58,7 @@ class NetconfEditConfigOperation(enum.Enum):
 CFG_ELEMENT = 'config'
 
 LOCK_DENIED_TAG = 'lock-denied'  # [RFC 4741]
+OPERATION_FAILED_TAG = 'operation-failed'  # [RFC 4741]
 CANDIDATE = 'candidate'
 RUNNING = 'running'
 STARTUP = 'startup'

@@ -270,6 +270,8 @@ class DeviceCommandsDirective(rst.Directive):
         devices_info = []
 
         for file_loader in manager.extensions:
+            if not file_loader.name.startswith('netmiko_'):
+                continue
             switch = file_loader.plugin
             module = inspect.getmodule(switch)
             file_content = inspect.getsource(module)
