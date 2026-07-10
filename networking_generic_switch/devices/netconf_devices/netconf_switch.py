@@ -10,6 +10,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import atexit
 from urllib.parse import parse_qs as urlparse_qs
 from urllib.parse import urlparse
 import uuid
@@ -20,16 +21,21 @@ from ncclient.operations.rpc import RPCError
 from ncclient.transport.errors import AuthenticationError
 from ncclient.transport.errors import SessionCloseError
 from ncclient.transport.errors import SSHError
+from oslo_config import cfg
 from oslo_log import log as logging
+from oslo_utils import strutils
 import tenacity
+from tooz import coordination
 
 from networking_generic_switch import devices
+from networking_generic_switch.devices import utils as device_utils
 from networking_generic_switch import exceptions as exc
 from networking_generic_switch import locking as ngs_lock
 from networking_generic_switch.netconf_models import constants as ncconst
 from networking_generic_switch.netconf_models import utils as ncutils
 
 LOG = logging.getLogger(__name__)
+CONF = cfg.CONF
 
 
 class NetconfSwitch(devices.GenericSwitchDevice):
@@ -70,6 +76,16 @@ class NetconfSwitch(devices.GenericSwitchDevice):
         self._netconf_save_config = self.ngs_config.get(
             'ngs_netconf_save_config')
 
+        self._confirmed_commit = strutils.bool_from_string(
+            self.ngs_config.get('ngs_netconf_confirmed_commit', True))
+        self._confirmed_commit_timeout = int(
+            self.ngs_config.get('ngs_netconf_confirmed_commit_timeout', 5))
+        if (self._confirmed_commit_timeout < 1
+                or self._confirmed_commit_timeout > 30):
+            raise exc.GenericSwitchConfigException(
+                option='ngs_netconf_confirmed_commit_timeout',
+                allowed_options='integer between 1 and 30')
+
         netconf_logger = logging.getLogger('ncclient')
         netconf_logger.setLevel(logging.WARNING)
 
@@ -77,9 +93,20 @@ class NetconfSwitch(devices.GenericSwitchDevice):
             'locks_pool_size': int(
                 self.ngs_config.get('ngs_max_connections', 1)),
             'locks_prefix': self.config.get('host', ''),
-            'timeout': 0,
+            'timeout': CONF.ngs_coordination.acquire_timeout,
         }
         self.locker = None
+        if CONF.ngs_coordination.backend_url:
+            self.locker = coordination.get_coordinator(
+                CONF.ngs_coordination.backend_url,
+                ('ngs-' + device_utils.get_hostname()).encode('ascii'))
+            self.locker.start()
+            atexit.register(self.locker.stop)
+        else:
+            LOG.warning(
+                "Switch %s: [ngs_coordination] backend_url is not "
+                "configured. The ngs_max_connections is ignored.",
+                self.lock_kwargs['locks_prefix'])
 
     def _build_ncclient_args(self):
         """Build keyword arguments for ``ncclient.manager.connect``.
@@ -199,13 +226,15 @@ class NetconfSwitch(devices.GenericSwitchDevice):
     @tenacity.retry(
         reraise=True,
         retry=tenacity.retry_if_exception_type(
-            exc.GenericSwitchNetconfLockDenied),
-        wait=tenacity.wait_random_exponential(multiplier=1, min=2, max=10),
-        stop=tenacity.stop_after_attempt(5))
+            (exc.GenericSwitchNetconfLockDenied,
+             exc.GenericSwitchNetconfOperationFailed)),
+        wait=tenacity.wait_exponential(multiplier=1, min=2, max=5),
+        stop=tenacity.stop_after_attempt(10))
     def _lock_and_configure(self, client, source, config):
         """Lock *source* datastore, edit-config, and commit.
 
-        Retries with exponential back-off on lock-denied errors.
+        Retries with exponential back-off (2s, 4s, 5s, 5s, ...) on
+        lock-denied and operation-failed errors.
 
         :param client: An active ``ncclient.manager.Manager`` session.
         :param source: Datastore name (``candidate`` or ``running``).
@@ -213,11 +242,13 @@ class NetconfSwitch(devices.GenericSwitchDevice):
             ``to_xml_element()`` method.
         :raises: GenericSwitchNetconfLockDenied if the datastore lock
             cannot be acquired (triggers tenacity retry).
+        :raises: GenericSwitchNetconfOperationFailed if the device
+            returns operation-failed (triggers tenacity retry).
         """
         try:
             with client.locked(source):
                 xml_config = ncutils.config_to_xml(config)
-                LOG.info(
+                LOG.debug(
                     'Sending configuration to Netconf device %(dev)s: '
                     '%(conf)s',
                     {'dev': self.device_name, 'conf': xml_config})
@@ -227,9 +258,13 @@ class NetconfSwitch(devices.GenericSwitchDevice):
                     if (':validate' in self.capabilities
                             or ':validate:1.1' in self.capabilities):
                         client.validate(source='candidate')
-                    if (':confirmed-commit' in self.capabilities
-                            or ':confirmed-commit:1.1' in self.capabilities):
-                        client.commit(confirmed=True, timeout=str(30))
+                    if (self._confirmed_commit
+                            and (':confirmed-commit' in self.capabilities
+                                 or ':confirmed-commit:1.1'
+                                 in self.capabilities)):
+                        client.commit(confirmed=True,
+                                      timeout=str(
+                                          self._confirmed_commit_timeout))
                     client.commit()
                 elif source == ncconst.RUNNING:
                     client.edit_config(target=source, config=xml_config)
@@ -241,6 +276,12 @@ class NetconfSwitch(devices.GenericSwitchDevice):
                         and self._get_lock_session_id(err.info) == '0'):
                     client.discard_changes()
                 raise exc.GenericSwitchNetconfLockDenied()
+            elif err.tag == ncconst.OPERATION_FAILED_TAG:
+                LOG.warning(
+                    'Netconf device %(dev)s returned operation-failed, '
+                    'retrying: %(msg)s',
+                    {'dev': self.device_name, 'msg': err.message})
+                raise exc.GenericSwitchNetconfOperationFailed()
             else:
                 LOG.error('Netconf XML: %s', ncutils.config_to_xml(config))
                 raise err
@@ -256,8 +297,8 @@ class NetconfSwitch(devices.GenericSwitchDevice):
         :param client: An active ``ncclient.manager.Manager`` session.
         """
         if self._netconf_save_config:
-            LOG.info('Saving configuration on Netconf device %s '
-                     'via edit-config', self.device_name)
+            LOG.debug('Saving configuration on Netconf device %s '
+                      'via edit-config', self.device_name)
             client.edit_config(target=ncconst.RUNNING,
                                config=self._netconf_save_config)
         elif ':startup' in self.capabilities:
@@ -340,7 +381,7 @@ class NetconfSwitch(devices.GenericSwitchDevice):
             the physical network, or None if convergence is not active.
         """
         if not self._do_vlan_management():
-            LOG.info("Skipping add network for %s", segmentation_id)
+            LOG.debug("Skipping add network for %s", segmentation_id)
             return
         network_id = uuid.UUID(network_id).hex
         network_name = self._get_network_name(network_id, segmentation_id)

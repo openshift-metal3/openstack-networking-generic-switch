@@ -71,6 +71,7 @@ netmiko_nokia_srl = "networking_generic_switch.devices.netmiko_devices.nokia:Nok
 netmiko_pluribus = "networking_generic_switch.devices.netmiko_devices.pluribus:Pluribus"
 netmiko_aruba_aoscx = "networking_generic_switch.devices.netmiko_devices.aruba:ArubaOSCX"
 netmiko_fake = "networking_generic_switch.devices.netmiko_devices.fake:Fake"
+netconf_openconfig = "networking_generic_switch.devices.netconf_devices.openconfig:NetconfOpenConfigSwitch"
 
 [project.entry-points."tempest.test_plugins"]
 ngs_tests = "tempest_plugin.plugin:NGSTempestPlugin"

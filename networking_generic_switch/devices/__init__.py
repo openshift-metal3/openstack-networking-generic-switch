@@ -69,6 +69,18 @@ NGS_INTERNAL_OPTS = [
     # XML config payload sent via edit-config to the running datastore
     # to persist configuration.
     {'name': 'ngs_netconf_save_config'},
+    # OpenConfig: L2/L3 forwarding instance for VLANs
+    {'name': 'ngs_openconfig_network_instance', 'default': 'default'},
+    # JSON dict {"pattern": "...", "repl": "..."} for regex substitution
+    # on port IDs from LLDP
+    {'name': 'ngs_port_id_re_sub'},
+    # OpenConfig: comma-separated list of disabled properties
+    # (e.g. "port_mtu")
+    {'name': 'ngs_openconfig_disabled_properties'},
+    # Whether to use confirmed commit when the switch advertises it.
+    {'name': 'ngs_netconf_confirmed_commit', 'default': True},
+    # Rollback timeout (seconds) for the tentative confirmed commit.
+    {'name': 'ngs_netconf_confirmed_commit_timeout', 'default': 5},
 ]
 
 EM_SEMAPHORE = 'ngs_device_manager'

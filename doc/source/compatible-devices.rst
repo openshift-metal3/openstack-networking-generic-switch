@@ -2,21 +2,23 @@
 Compatible Devices
 ==================
 
-The following devices are compatible with this plugin:
-
-.. netmiko-device-commands::
-  :output-type: all-devices
-
-This Mechanism Driver architecture allows easily to add more devices
-of any type.
+Networking-generic-switch supports two families of device drivers: Netmiko
+(SSH/CLI) and NETCONF. The Mechanism Driver architecture allows adding new
+devices of either type.
 
 ::
 
   OpenStack Neutron v2.0 => ML2 plugin => Generic Mechanism Driver => Device plugin
 
+Netmiko (SSH/CLI) Devices
+=========================
+
 These device plugins use `Netmiko <https://github.com/ktbyers/netmiko>`_
 library, which in turn uses `Paramiko` library to access and configure
 the switches via the SSH protocol.
+
+.. netmiko-device-commands::
+  :output-type: all-devices
 
 Cisco Nexus (netmiko_cisco_nxos)
 --------------------------------
@@ -103,3 +105,33 @@ Notes:
    configuration of the trunk uplink ports with the ``ngs_trunk_ports``
    configuration option for Networking-Generic-Switch.
  * Security groups not yet implemented
+
+NETCONF Devices
+===============
+
+These device plugins use `ncclient <https://github.com/ncclient/ncclient>`_
+library to access and configure switches via the NETCONF protocol
+(RFC 6241). See :doc:`management-interfaces` for details on NETCONF
+management interface behaviour.
+
+NETCONF OpenConfig (netconf_openconfig)
+---------------------------------------
+
+Compatible with switches supporting `OpenConfig <https://openconfig.net/>`_
+YANG models over NETCONF.
+Known platforms include Cisco NX-OS (Nexus 9000), Arista EOS, Juniper Junos
+and Nokia SR OS.
+
+Supported operations:
+
+ * Network (VLAN) management — create and delete VLANs in a named
+   network-instance.
+ * Port management — assign access VLANs to switch interfaces.
+ * Trunk port tagging — automatically tag/untag ``ngs_trunk_ports``
+   when networks are created or deleted.
+ * Port enable/disable — administratively shut down inactive ports
+   when ``ngs_disable_inactive_ports`` is set.
+ * Default VLAN restore — restore ``ngs_port_default_vlan`` when a
+   port is released.
+
+Not yet supported: bond/LACP, L2VNI, trunk subports, security groups.

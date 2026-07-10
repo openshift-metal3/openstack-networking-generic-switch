@@ -14,15 +14,33 @@ import unittest
 from unittest import mock
 from xml.etree import ElementTree
 
+import fixtures
 from ncclient import manager
+from ncclient.operations.rpc import RPCError
 from ncclient.transport.errors import AuthenticationError
 from ncclient.transport.errors import SSHError
+from oslo_config import fixture as config_fixture
+from tooz import coordination
 
 from networking_generic_switch.devices.netconf_devices import netconf_switch
+from networking_generic_switch.devices import utils as device_utils
 from networking_generic_switch import exceptions as exc
+from networking_generic_switch import locking as ngs_lock
 from networking_generic_switch.netconf_models import constants as ncconst
 from networking_generic_switch.netconf_models.openconfig.interfaces \
     import interfaces
+
+
+def _make_rpc_error(tag, message=None):
+    """Build a minimal RPCError from an XML element."""
+    ns = 'urn:ietf:params:xml:ns:netconf:base:1.0'
+    root = ElementTree.Element('{%s}rpc-error' % ns)
+    tag_el = ElementTree.SubElement(root, '{%s}error-tag' % ns)
+    tag_el.text = tag
+    if message:
+        msg_el = ElementTree.SubElement(root, '{%s}error-message' % ns)
+        msg_el.text = message
+    return RPCError(root)
 
 
 DEVICE_CFG_MINIMAL = {
@@ -64,6 +82,18 @@ class TestNetconfSwitchInit(unittest.TestCase):
     def test_trunk_vlans_converge_is_true(self):
         switch = _make_switch()
         self.assertTrue(switch.trunk_vlans_converge)
+
+    def test_confirmed_commit_timeout_too_low(self):
+        self.assertRaises(
+            exc.GenericSwitchConfigException,
+            _make_switch,
+            {'ngs_netconf_confirmed_commit_timeout': '0'})
+
+    def test_confirmed_commit_timeout_too_high(self):
+        self.assertRaises(
+            exc.GenericSwitchConfigException,
+            _make_switch,
+            {'ngs_netconf_confirmed_commit_timeout': '31'})
 
     def test_ncclient_args_defaults(self):
         cfg = {
@@ -174,7 +204,31 @@ class TestLockAndConfigure(unittest.TestCase):
             config='<config><fake /></config>')
         mock_client.validate.assert_not_called()
         mock_client.commit.assert_has_calls([
-            mock.call(confirmed=True, timeout=str(30)), mock.call()])
+            mock.call(confirmed=True, timeout=str(5)), mock.call()])
+
+    def test_confirmed_commit_disabled(self):
+        switch = _make_switch({'ngs_netconf_confirmed_commit': 'false'})
+        switch.capabilities = {':candidate', ':writable-running',
+                               ':confirmed-commit'}
+        fake_config = mock.Mock()
+        fake_config.to_xml_element.return_value = ElementTree.Element('fake')
+        mock_client = mock.MagicMock()
+        switch._lock_and_configure(
+            mock_client, ncconst.CANDIDATE, [fake_config])
+        mock_client.commit.assert_called_once_with()
+
+    def test_confirmed_commit_custom_timeout(self):
+        switch = _make_switch(
+            {'ngs_netconf_confirmed_commit_timeout': '10'})
+        switch.capabilities = {':candidate', ':writable-running',
+                               ':confirmed-commit'}
+        fake_config = mock.Mock()
+        fake_config.to_xml_element.return_value = ElementTree.Element('fake')
+        mock_client = mock.MagicMock()
+        switch._lock_and_configure(
+            mock_client, ncconst.CANDIDATE, [fake_config])
+        mock_client.commit.assert_has_calls([
+            mock.call(confirmed=True, timeout='10'), mock.call()])
 
     def test_validate(self):
         switch = _make_switch()
@@ -224,6 +278,54 @@ class TestLockAndConfigure(unittest.TestCase):
                 mock_client, ncconst.RUNNING, [fake_config])
         mock_client.edit_config.assert_called_once()
         mock_save.assert_not_called()
+
+    @mock.patch('tenacity.nap.time', autospec=True)
+    @mock.patch.object(netconf_switch, 'LOG', autospec=True)
+    def test_operation_failed_raises_retryable_exception(self, mock_log,
+                                                         mock_tenacity_nap):
+        switch = _make_switch()
+        switch.capabilities = {':candidate'}
+        fake_config = mock.Mock()
+        fake_config.to_xml_element.return_value = ElementTree.Element('fake')
+        mock_client = mock.MagicMock()
+        rpc_err = _make_rpc_error(ncconst.OPERATION_FAILED_TAG,
+                                  'Operation failed')
+        mock_client.commit.side_effect = rpc_err
+        self.assertRaises(
+            exc.GenericSwitchNetconfOperationFailed,
+            switch._lock_and_configure,
+            mock_client, ncconst.CANDIDATE, [fake_config])
+        mock_log.warning.assert_any_call(
+            'Netconf device %(dev)s returned operation-failed, '
+            'retrying: %(msg)s',
+            {'dev': 'test-switch', 'msg': 'Operation failed'})
+
+    @mock.patch('tenacity.nap.time', autospec=True)
+    def test_operation_failed_is_retried(self, mock_tenacity_nap):
+        switch = _make_switch()
+        switch.capabilities = {':candidate'}
+        fake_config = mock.Mock()
+        fake_config.to_xml_element.return_value = ElementTree.Element('fake')
+        rpc_err = _make_rpc_error(ncconst.OPERATION_FAILED_TAG,
+                                  'Operation failed')
+        mock_client = mock.MagicMock()
+        mock_client.commit.side_effect = [rpc_err, None, None]
+        switch._lock_and_configure(
+            mock_client, ncconst.CANDIDATE, [fake_config])
+        self.assertEqual(2, mock_client.commit.call_count)
+
+    def test_unknown_rpc_error_not_retried(self):
+        switch = _make_switch()
+        switch.capabilities = {':candidate'}
+        fake_config = mock.Mock()
+        fake_config.to_xml_element.return_value = ElementTree.Element('fake')
+        rpc_err = _make_rpc_error('data-exists')
+        mock_client = mock.MagicMock()
+        mock_client.commit.side_effect = rpc_err
+        self.assertRaises(
+            RPCError,
+            switch._lock_and_configure,
+            mock_client, ncconst.CANDIDATE, [fake_config])
 
 
 class TestSaveRunningConfig(unittest.TestCase):
@@ -699,3 +801,67 @@ class TestStubMethods(unittest.TestCase):
         switch.del_security_group('sg-123')
         switch.bind_security_group(mock.Mock(), 'eth1/1', ['eth1/1'])
         switch.unbind_security_group('sg-123', 'eth1/1', ['eth1/1'])
+
+
+class TestNetconfSwitchCoordination(fixtures.TestWithFixtures):
+
+    def setUp(self):
+        super().setUp()
+        self.cfg = self.useFixture(config_fixture.Config())
+
+    @mock.patch.object(device_utils, 'get_hostname', autospec=True)
+    @mock.patch.object(coordination, 'get_coordinator', autospec=True)
+    def test_coordinator_created_when_backend_url_configured(
+            self, mock_get_coord, mock_hostname):
+        self.cfg.config(acquire_timeout=120, backend_url='etcd3://localhost',
+                        group='ngs_coordination')
+        coord = mock.Mock()
+        mock_get_coord.return_value = coord
+        mock_hostname.return_value = 'viking'
+        switch = _make_switch({'ngs_max_connections': 2})
+        self.assertEqual(coord, switch.locker)
+        mock_get_coord.assert_called_once_with(
+            'etcd3://localhost', b'ngs-viking')
+        coord.start.assert_called_once()
+
+    @mock.patch.object(device_utils, 'get_hostname', autospec=True)
+    @mock.patch.object(ngs_lock, 'PoolLock', autospec=True)
+    @mock.patch.object(manager, 'connect', autospec=True)
+    @mock.patch.object(coordination, 'get_coordinator', autospec=True)
+    def test_pool_lock_called_with_coordinator(
+            self, mock_get_coord, mock_manager, mock_pool_lock,
+            mock_hostname):
+        self.cfg.config(acquire_timeout=120, backend_url='etcd3://localhost',
+                        group='ngs_coordination')
+        coord = mock.Mock()
+        mock_get_coord.return_value = coord
+        mock_hostname.return_value = 'viking'
+        switch = _make_switch({'ngs_max_connections': 2})
+
+        mock_ncclient = mock.Mock()
+        fake_caps = {ncconst.IANA_NETCONF_CAPABILITIES[':candidate']}
+        mock_ncclient.server_capabilities = fake_caps
+        mock_manager.return_value.__enter__.return_value = mock_ncclient
+        mock_pool_lock.return_value.__enter__ = mock.Mock()
+        mock_pool_lock.return_value.__exit__ = mock.Mock(return_value=False)
+
+        with mock.patch.object(switch, '_lock_and_configure', autospec=True):
+            switch.send_config_to_device(mock.Mock())
+
+        mock_pool_lock.assert_called_once_with(
+            coord, locks_pool_size=2,
+            locks_prefix='switch.example.com',
+            timeout=120)
+
+    def test_locker_none_when_no_backend_url(self):
+        switch = _make_switch()
+        self.assertIsNone(switch.locker)
+
+    def test_warning_logged_when_no_backend_url(self):
+        with mock.patch.object(netconf_switch, 'LOG',
+                               autospec=True) as mock_log:
+            _make_switch()
+        mock_log.warning.assert_called_once_with(
+            "Switch %s: [ngs_coordination] backend_url is not "
+            "configured. The ngs_max_connections is ignored.",
+            'switch.example.com')
