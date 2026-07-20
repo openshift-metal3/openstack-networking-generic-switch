@@ -8,13 +8,18 @@ Welcome to networking-generic-switch's documentation!
    installation
    configuration
    management-interfaces
-   admin
-   troubleshooting
+   admin/index
    dev/dev-quickstart
    contributing
    netmiko-device-commands
    netconf-device-commands
    contributor/api/modules
+
+.. toctree::
+   :hidden:
+
+   admin
+   troubleshooting
 
 Indices and tables
 ==================
