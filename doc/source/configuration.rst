@@ -57,7 +57,7 @@ containing switch configuration::
         --config-file /etc/neutron/plugins/ml2/ml2_conf_genericswitch.ini
 
 For operational topics such as performance tuning, VXLAN L2VNI support,
-and advanced features, see the :doc:`admin` guide.
+and advanced features, see the :doc:`admin/index` guide.
 
 Switch configuration
 ====================
