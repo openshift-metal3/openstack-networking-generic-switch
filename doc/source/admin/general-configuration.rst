@@ -168,6 +168,23 @@ because the agent needs access to all active VLANs.
 
 Note that this option is only used if ``ngs_manage_vlans = True``.
 
+.. _neutron-trunk-ports:
+
+Neutron Trunk Ports
+===================
+
+When a baremetal port is the parent of a Neutron trunk, subports can be
+added and removed dynamically via the trunk API. The parent port's VLAN is
+configured as the native (untagged) VLAN on the switch interface, while each
+subport carries a ``segmentation_id`` (VLAN) that is tagged on the same
+interface.
+
+Some drivers support a converging approach for trunk subport management.
+When the mechanism driver has access to the full trunk state (all subports,
+not just the delta), it writes the complete set of trunk VLANs in a single
+operation. This ensures the switch converges to the desired state regardless
+of any intermediate inconsistencies.
+
 .. _physicalnetworks:
 
 Multiple physical networks

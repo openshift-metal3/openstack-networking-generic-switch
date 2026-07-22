@@ -129,9 +129,11 @@ Supported operations:
  * Port management — assign access VLANs to switch interfaces.
  * Trunk port tagging — automatically tag/untag ``ngs_trunk_ports``
    when networks are created or deleted.
+ * Neutron trunk ports — dynamically add and remove subport VLANs
+   on trunk ports via the Neutron trunk API.
  * Port enable/disable — administratively shut down inactive ports
    when ``ngs_disable_inactive_ports`` is set.
  * Default VLAN restore — restore ``ngs_port_default_vlan`` when a
    port is released.
 
-Not yet supported: bond/LACP, L2VNI, trunk subports, security groups.
+Not yet supported: bond/LACP, L2VNI, security groups.

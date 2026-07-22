@@ -1581,7 +1581,8 @@ class TestGenericSwitchDriver(unittest.TestCase):
 
         # Verify switch configuration was called
         mock_get_switch.return_value.add_subports_on_trunk.assert_has_calls(
-            [mock.call(parent_port['binding:profile'], 2222, subports)])
+            [mock.call(parent_port['binding:profile'], 2222, subports,
+                       trunk_details=None)])
 
         # Verify status was updated for each subport
         self.assertEqual(
@@ -1653,7 +1654,123 @@ class TestGenericSwitchDriver(unittest.TestCase):
 
         driver.subports_deleted(self.ctxt, parent_port, subports=subports)
         mock_get_switch.return_value.del_subports_on_trunk.assert_has_calls(
-            [mock.call(parent_port['binding:profile'], 2222, subports)])
+            [mock.call(parent_port['binding:profile'], 2222, subports,
+                       trunk_details=None)])
+
+    @mock.patch.object(directory, "get_plugin", autospec=True)
+    @mock.patch.object(device_utils, "get_switch_device", autospec=True)
+    def test_subports_added_with_trunk_details(self, mock_get_switch,
+                                               mock_plugin, m_list):
+        """Verify trunk_details from parent port is passed to switch driver."""
+        driver = gsm.GenericSwitchDriver()
+        driver.initialize()
+
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [
+                {'segmentation_id': 200, 'port_id': 's1'},
+                {'segmentation_id': 300, 'port_id': 's2'},
+            ],
+        }
+        parent_port = {
+            'binding:profile': {
+                'local_link_information': [
+                    {
+                        'switch_info': 'bar',
+                        'port_id': 2222
+                    }
+                ]},
+            'binding:vnic_type': 'baremetal',
+            'id': '123',
+            'trunk_details': trunk_details,
+        }
+        subports = [{"segmentation_id": 300, "port_id": "s2"}]
+
+        mock_plugin.return_value = mock.MagicMock()
+        mock_plugin.return_value.get_port.return_value = {"status": "DOWN"}
+
+        driver.subports_added(self.ctxt, parent_port, subports=subports)
+
+        mock_get_switch.return_value.add_subports_on_trunk.assert_has_calls(
+            [mock.call(parent_port['binding:profile'], 2222, subports,
+                       trunk_details=trunk_details)])
+
+    @mock.patch.object(directory, "get_plugin", autospec=True)
+    @mock.patch.object(device_utils, "get_switch_device", autospec=True)
+    def test_subports_deleted_with_trunk_details(self, mock_get_switch,
+                                                 mock_plugin, m_list):
+        """Verify trunk_details from parent port is passed on delete."""
+        driver = gsm.GenericSwitchDriver()
+        driver.initialize()
+
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [
+                {'segmentation_id': 200, 'port_id': 's1'},
+            ],
+        }
+        parent_port = {
+            'binding:profile': {
+                'local_link_information': [
+                    {
+                        'switch_info': 'bar',
+                        'port_id': 2222
+                    }
+                ]},
+            'binding:vnic_type': 'baremetal',
+            'id': '123',
+            'trunk_details': trunk_details,
+        }
+        subports = [{"segmentation_id": 300, "port_id": "s2"}]
+
+        driver.subports_deleted(self.ctxt, parent_port, subports=subports)
+        mock_get_switch.return_value.del_subports_on_trunk.assert_has_calls(
+            [mock.call(parent_port['binding:profile'], 2222, subports,
+                       trunk_details=trunk_details)])
+
+    @mock.patch.object(provisioning_blocks, 'provisioning_complete',
+                       autospec=True)
+    def test_update_port_postcommit_trunk_passes_trunk_details(self,
+                                                               m_pc, m_list):
+        """Verify plug_port_to_network receives trunk_details kwarg."""
+        driver = gsm.GenericSwitchDriver()
+        driver.initialize()
+        mock_context = mock.create_autospec(driver_context.PortContext)
+        mock_context._plugin_context = mock.MagicMock()
+        mock_context._plugin = mock.MagicMock()
+        trunk_details = {
+            'sub_ports': [
+                {'segmentation_id': 1234, 'port_id': 's1'}
+            ]
+        }
+        mock_context.current = {
+            'binding:profile': {
+                'local_link_information': [
+                    {'switch_info': 'foo', 'port_id': 2222}
+                ]},
+            'binding:vnic_type': 'baremetal',
+            'id': '123',
+            'binding:vif_type': 'other',
+            'status': 'DOWN',
+            'trunk_details': trunk_details,
+        }
+        mock_context.original = {
+            'binding:profile': {},
+            'binding:vnic_type': 'baremetal',
+            'id': '123',
+            'binding:vif_type': 'unbound'}
+        mock_context.bottom_bound_segment = {
+            'physical_network': 'physnet1',
+            'network_id': 'aaaa-bbbb-ccc',
+            'segmentation_id': 123}
+        self.switch_mock._get_physical_networks.return_value = ['physnet1']
+        self.switch_mock.support_trunk_on_bond_ports = True
+        self.switch_mock.support_trunk_on_ports = True
+
+        driver.update_port_postcommit(mock_context)
+        self.switch_mock.plug_port_to_network.assert_called_once_with(
+            2222, 123, trunk_details=trunk_details)
+        m_pc.assert_called_once()
 
     def test_empty_methods(self, m_list):
         driver = gsm.GenericSwitchDriver()
@@ -2294,7 +2411,8 @@ class TestGenericSwitchDriver(unittest.TestCase):
 
         # Verify VLAN trunking was configured for both subports
         mock_switch.add_subports_on_trunk.assert_called_once_with(
-            parent_port['binding:profile'], 2222, subports)
+            parent_port['binding:profile'], 2222, subports,
+            trunk_details=None)
 
         # Verify L2VNI was configured only for s1 (has VNI)
         mock_switch.vlan_has_vni.assert_called_once_with(100, 5000)
@@ -2343,7 +2461,8 @@ class TestGenericSwitchDriver(unittest.TestCase):
 
         # Verify VLAN trunking was configured
         mock_switch.add_subports_on_trunk.assert_called_once_with(
-            parent_port['binding:profile'], 2222, subports)
+            parent_port['binding:profile'], 2222, subports,
+            trunk_details=None)
 
         # Verify L2VNI was NOT configured (no VNI in binding_profile)
         mock_switch.vlan_has_vni.assert_not_called()
@@ -2395,7 +2514,8 @@ class TestGenericSwitchDriver(unittest.TestCase):
 
         # Verify VLAN was removed from trunk
         mock_switch.del_subports_on_trunk.assert_called_once_with(
-            parent_port['binding:profile'], 2222, subports)
+            parent_port['binding:profile'], 2222, subports,
+            trunk_details=None)
 
         # Verify L2VNI cleanup was performed
         mock_switch.vlan_has_ports.assert_called_once_with(100)
@@ -2444,7 +2564,8 @@ class TestGenericSwitchDriver(unittest.TestCase):
 
         # Verify VLAN was removed from trunk
         mock_switch.del_subports_on_trunk.assert_called_once_with(
-            parent_port['binding:profile'], 2222, subports)
+            parent_port['binding:profile'], 2222, subports,
+            trunk_details=None)
 
         # Verify L2VNI cleanup was skipped (VLAN still has ports)
         mock_switch.vlan_has_ports.assert_called_once_with(100)

@@ -127,6 +127,12 @@ command_descriptions = {
         multicast group flooding for BUM traffic on a VNI',
     'PLUG_INGRESS_REPLICATION': 'A tuple of command strings used to \
         configure EVPN ingress-replication for BUM traffic on a VNI',
+    'PLUG_MCAST_GROUP': 'A tuple of command strings used to \
+        configure a multicast group for BUM traffic replication \
+        on a VXLAN VNI',
+    'UNPLUG_MCAST_GROUP': 'A tuple of command strings used to \
+        remove the multicast group configuration from a VXLAN \
+        VNI',
     'PLUG_EVPN_VRF_TARGET': 'A tuple of command strings used to \
         configure an EVPN VRF target for L2VNI',
     'UNPLUG_EVPN_VRF_TARGET': 'A tuple of command strings used to \

@@ -328,11 +328,71 @@ class TestPlugPortToNetwork(unittest.TestCase):
                          sv.config.interface_mode)
         self.assertEqual(150, sv.config.access_vlan)
 
+    def test_trunk_details_sets_trunk_mode(self):
+        switch = _make_switch()
+        trunk_details = {
+            'sub_ports': [
+                {'segmentation_id': 200},
+                {'segmentation_id': 300},
+            ],
+        }
+        result = switch._plug_port_to_network(
+            port_id='Ethernet1/1', segmentation_id=100,
+            trunk_details=trunk_details)
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(oc_constants.VLAN_MODE_TRUNK,
+                         sv.config.interface_mode)
+        self.assertEqual(100, sv.config.native_vlan)
+        self.assertIn(200, sv.config.trunk_vlans)
+        self.assertIn(300, sv.config.trunk_vlans)
+        self.assertEqual(2, len(sv.config.trunk_vlans))
+
+    def test_trunk_details_empty_subports(self):
+        switch = _make_switch()
+        trunk_details = {
+            'sub_ports': [],
+        }
+        result = switch._plug_port_to_network(
+            port_id='Ethernet1/1', segmentation_id=100,
+            trunk_details=trunk_details)
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(oc_constants.VLAN_MODE_TRUNK,
+                         sv.config.interface_mode)
+        self.assertEqual(100, sv.config.native_vlan)
+        self.assertEqual(0, len(sv.config.trunk_vlans))
+
+    def test_trunk_details_none_uses_access_mode(self):
+        switch = _make_switch()
+        result = switch._plug_port_to_network(
+            port_id='Ethernet1/1', segmentation_id=100,
+            trunk_details=None)
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual(oc_constants.VLAN_MODE_ACCESS,
+                         sv.config.interface_mode)
+        self.assertEqual(100, sv.config.access_vlan)
+
     def test_port_id_resub_applied(self):
         re_sub = {'pattern': 'Ethernet', 'repl': 'eth'}
         switch = _make_switch({'ngs_port_id_re_sub': re_sub})
         result = switch._plug_port_to_network(
             port_id='Ethernet1/1', segmentation_id=100)
+        iface = list(result[0])[0]
+        self.assertEqual('eth1/1', iface.name)
+
+    def test_port_id_resub_applied_with_trunk_details(self):
+        re_sub = {'pattern': 'Ethernet', 'repl': 'eth'}
+        switch = _make_switch({'ngs_port_id_re_sub': re_sub})
+        trunk_details = {
+            'sub_ports': [{'segmentation_id': 200}],
+        }
+        result = switch._plug_port_to_network(
+            port_id='Ethernet1/1', segmentation_id=100,
+            trunk_details=trunk_details)
         iface = list(result[0])[0]
         self.assertEqual('eth1/1', iface.name)
 
@@ -412,6 +472,203 @@ class TestDisablePort(unittest.TestCase):
         re_sub = {'pattern': 'Ethernet', 'repl': 'eth'}
         switch = _make_switch({'ngs_port_id_re_sub': re_sub})
         result = switch._disable_port(port_id='Ethernet1/1')
+        iface = list(result[0])[0]
+        self.assertEqual('eth1/1', iface.name)
+
+
+class TestSupportTrunkOnPorts(unittest.TestCase):
+
+    def test_returns_true(self):
+        switch = _make_switch()
+        self.assertTrue(switch.support_trunk_on_ports)
+
+
+class TestAddSubportsOnTrunk(unittest.TestCase):
+
+    BINDING_PROFILE = {
+        'local_link_information': [
+            {'port_id': 'Ethernet1/1', 'switch_info': 'test-switch'}
+        ]
+    }
+
+    def test_returns_interfaces(self):
+        switch = _make_switch()
+        result = switch._add_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200}])
+        self.assertEqual(1, len(result))
+        self.assertIsInstance(result[0], Interfaces)
+
+    def test_delta_merge_without_trunk_details(self):
+        switch = _make_switch()
+        result = switch._add_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200},
+                      {'segmentation_id': 300}])
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual(oc_constants.VLAN_MODE_TRUNK,
+                         sv.config.interface_mode)
+        self.assertEqual('merge', sv.config.operation)
+        self.assertIn(200, sv.config.trunk_vlans)
+        self.assertIn(300, sv.config.trunk_vlans)
+        self.assertEqual(2, len(sv.config.trunk_vlans))
+
+    def test_converge_replace_with_trunk_details(self):
+        switch = _make_switch()
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [
+                {'segmentation_id': 200},
+                {'segmentation_id': 300},
+                {'segmentation_id': 400},
+            ],
+        }
+        result = switch._add_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 400}],
+            trunk_details=trunk_details)
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(oc_constants.VLAN_MODE_TRUNK,
+                         sv.config.interface_mode)
+        self.assertEqual(100, sv.config.native_vlan)
+        self.assertIn(200, sv.config.trunk_vlans)
+        self.assertIn(300, sv.config.trunk_vlans)
+        self.assertIn(400, sv.config.trunk_vlans)
+        self.assertEqual(3, len(sv.config.trunk_vlans))
+
+    def test_converge_no_native_vlan(self):
+        switch = _make_switch()
+        trunk_details = {
+            'sub_ports': [{'segmentation_id': 200}],
+        }
+        result = switch._add_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200}],
+            trunk_details=trunk_details)
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertIsNone(sv.config.native_vlan)
+        self.assertIn(200, sv.config.trunk_vlans)
+
+    def test_port_id_resub_applied(self):
+        re_sub = {'pattern': 'Ethernet', 'repl': 'eth'}
+        switch = _make_switch({'ngs_port_id_re_sub': re_sub})
+        result = switch._add_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200}])
+        iface = list(result[0])[0]
+        self.assertEqual('eth1/1', iface.name)
+
+
+class TestDelSubportsOnTrunk(unittest.TestCase):
+
+    BINDING_PROFILE = {
+        'local_link_information': [
+            {'port_id': 'Ethernet1/1', 'switch_info': 'test-switch'}
+        ]
+    }
+
+    def test_returns_interfaces(self):
+        switch = _make_switch()
+        result = switch._del_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200}])
+        self.assertEqual(1, len(result))
+        self.assertIsInstance(result[0], Interfaces)
+
+    def test_delta_remove_without_trunk_details(self):
+        switch = _make_switch()
+        result = switch._del_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200},
+                      {'segmentation_id': 300}])
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual(oc_constants.VLAN_MODE_TRUNK,
+                         sv.config.interface_mode)
+        self.assertEqual('merge', sv.config.operation)
+        self.assertIn(200, sv.config.trunk_vlans._removals)
+        self.assertIn(300, sv.config.trunk_vlans._removals)
+
+    def test_converge_replace_with_remaining_subports(self):
+        switch = _make_switch()
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [
+                {'segmentation_id': 300},
+                {'segmentation_id': 400},
+            ],
+        }
+        result = switch._del_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200}],
+            trunk_details=trunk_details)
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(oc_constants.VLAN_MODE_TRUNK,
+                         sv.config.interface_mode)
+        self.assertEqual(100, sv.config.native_vlan)
+        self.assertIn(300, sv.config.trunk_vlans)
+        self.assertIn(400, sv.config.trunk_vlans)
+        self.assertNotIn(200, sv.config.trunk_vlans)
+        self.assertEqual(2, len(sv.config.trunk_vlans))
+
+    def test_converge_remove_all_reverts_to_access(self):
+        switch = _make_switch()
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [],
+        }
+        result = switch._del_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200}],
+            trunk_details=trunk_details)
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(oc_constants.VLAN_MODE_ACCESS,
+                         sv.config.interface_mode)
+        self.assertEqual(100, sv.config.access_vlan)
+        self.assertEqual(0, len(sv.config.trunk_vlans))
+
+    def test_converge_remove_all_no_native_vlan(self):
+        switch = _make_switch()
+        trunk_details = {
+            'sub_ports': [],
+        }
+        result = switch._del_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200}],
+            trunk_details=trunk_details)
+        iface = list(result[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(oc_constants.VLAN_MODE_ACCESS,
+                         sv.config.interface_mode)
+        self.assertIsNone(sv.config.access_vlan)
+
+    def test_port_id_resub_applied(self):
+        re_sub = {'pattern': 'Ethernet', 'repl': 'eth'}
+        switch = _make_switch({'ngs_port_id_re_sub': re_sub})
+        result = switch._del_subports_on_trunk(
+            binding_profile=self.BINDING_PROFILE,
+            port_id='Ethernet1/1',
+            subports=[{'segmentation_id': 200}])
         iface = list(result[0])[0]
         self.assertEqual('eth1/1', iface.name)
 
@@ -624,3 +881,180 @@ class TestDispatchIntegration(unittest.TestCase):
             switch.delete_port('Ethernet1/1', 100)
         config = mock_send.call_args[0][0]
         self.assertEqual(1, len(config))
+
+    def test_plug_port_with_trunk_details(self):
+        switch = _make_switch()
+        trunk_details = {
+            'sub_ports': [
+                {'segmentation_id': 200},
+                {'segmentation_id': 300},
+            ],
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.plug_port_to_network(
+                'Ethernet1/1', 100, trunk_details=trunk_details)
+        mock_send.assert_called_once()
+        config = mock_send.call_args[0][0]
+        iface = list(config[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(oc_constants.VLAN_MODE_TRUNK,
+                         sv.config.interface_mode)
+        self.assertEqual(100, sv.config.native_vlan)
+        self.assertIn(200, sv.config.trunk_vlans)
+        self.assertIn(300, sv.config.trunk_vlans)
+
+    def test_plug_port_with_trunk_details_and_default_vlan(self):
+        switch = _make_switch({'ngs_port_default_vlan': '1'})
+        trunk_details = {
+            'sub_ports': [
+                {'segmentation_id': 200},
+            ],
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.plug_port_to_network(
+                'Ethernet1/1', 100, trunk_details=trunk_details)
+        mock_send.assert_called_once()
+        config = mock_send.call_args[0][0]
+        self.assertEqual(2, len(config))
+        clear_iface = list(config[0])[0]
+        self.assertEqual('remove',
+                         clear_iface.ethernet.switched_vlan.config.operation)
+        plug_iface = list(config[1])[0]
+        sv = plug_iface.ethernet.switched_vlan
+        self.assertEqual(oc_constants.VLAN_MODE_TRUNK,
+                         sv.config.interface_mode)
+        self.assertEqual(100, sv.config.native_vlan)
+        self.assertIn(200, sv.config.trunk_vlans)
+
+    def test_delete_port_with_trunk_details(self):
+        switch = _make_switch()
+        trunk_details = {
+            'sub_ports': [
+                {'segmentation_id': 200},
+                {'segmentation_id': 300},
+            ],
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.delete_port(
+                'Ethernet1/1', 100, trunk_details=trunk_details)
+        mock_send.assert_called_once()
+        config = mock_send.call_args[0][0]
+        self.assertEqual(1, len(config))
+        iface = list(config[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('remove', sv.config.operation)
+
+    def test_delete_port_with_trunk_details_restores_default_vlan(self):
+        switch = _make_switch({'ngs_port_default_vlan': '1'})
+        trunk_details = {
+            'sub_ports': [
+                {'segmentation_id': 200},
+            ],
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.delete_port(
+                'Ethernet1/1', 100, trunk_details=trunk_details)
+        mock_send.assert_called_once()
+        config = mock_send.call_args[0][0]
+        self.assertEqual(3, len(config))
+        self.assertIsInstance(config[0], Interfaces)
+        self.assertIsInstance(config[1], NetworkInstances)
+        self.assertIsInstance(config[2], Interfaces)
+        restore_iface = list(config[2])[0]
+        sv = restore_iface.ethernet.switched_vlan
+        self.assertEqual(oc_constants.VLAN_MODE_ACCESS,
+                         sv.config.interface_mode)
+
+    def test_add_subports_on_trunk_dispatch(self):
+        switch = _make_switch()
+        binding_profile = {
+            'local_link_information': [
+                {'port_id': 'Ethernet1/1', 'switch_info': 'test-switch'}
+            ]
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.add_subports_on_trunk(
+                binding_profile, 'Ethernet1/1',
+                [{'segmentation_id': 200}])
+        mock_send.assert_called_once()
+        config = mock_send.call_args[0][0]
+        self.assertIsInstance(config[0], Interfaces)
+
+    def test_del_subports_on_trunk_dispatch(self):
+        switch = _make_switch()
+        binding_profile = {
+            'local_link_information': [
+                {'port_id': 'Ethernet1/1', 'switch_info': 'test-switch'}
+            ]
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.del_subports_on_trunk(
+                binding_profile, 'Ethernet1/1',
+                [{'segmentation_id': 200}])
+        mock_send.assert_called_once()
+        config = mock_send.call_args[0][0]
+        self.assertIsInstance(config[0], Interfaces)
+
+    def test_add_subports_on_trunk_dispatch_with_trunk_details(self):
+        switch = _make_switch()
+        binding_profile = {
+            'local_link_information': [
+                {'port_id': 'Ethernet1/1', 'switch_info': 'test-switch'}
+            ]
+        }
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [
+                {'segmentation_id': 200},
+                {'segmentation_id': 300},
+            ],
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.add_subports_on_trunk(
+                binding_profile, 'Ethernet1/1',
+                [{'segmentation_id': 300}],
+                trunk_details=trunk_details)
+        mock_send.assert_called_once()
+        config = mock_send.call_args[0][0]
+        iface = list(config[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(100, sv.config.native_vlan)
+        self.assertIn(200, sv.config.trunk_vlans)
+        self.assertIn(300, sv.config.trunk_vlans)
+
+    def test_del_subports_on_trunk_dispatch_with_trunk_details(self):
+        switch = _make_switch()
+        binding_profile = {
+            'local_link_information': [
+                {'port_id': 'Ethernet1/1', 'switch_info': 'test-switch'}
+            ]
+        }
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [
+                {'segmentation_id': 300},
+            ],
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.del_subports_on_trunk(
+                binding_profile, 'Ethernet1/1',
+                [{'segmentation_id': 200}],
+                trunk_details=trunk_details)
+        mock_send.assert_called_once()
+        config = mock_send.call_args[0][0]
+        iface = list(config[0])[0]
+        sv = iface.ethernet.switched_vlan
+        self.assertEqual('replace', sv.config.operation)
+        self.assertEqual(100, sv.config.native_vlan)
+        self.assertIn(300, sv.config.trunk_vlans)
+        self.assertNotIn(200, sv.config.trunk_vlans)

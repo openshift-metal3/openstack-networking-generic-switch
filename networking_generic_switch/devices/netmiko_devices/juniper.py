@@ -42,6 +42,29 @@ class Juniper(netmiko_devices.NetmikoSwitch):
     Juniper Junos supports VXLAN L2VNI configuration on QFX and EX series
     switches. VLANs are referenced by name (created during add_network), and
     the VNI is mapped using the ``vxlan vni`` command.
+
+    BUM Traffic Replication
+    ~~~~~~~~~~~~~~~~~~~~~~~
+
+    Supports two BUM (Broadcast, Unknown unicast, Multicast) traffic
+    replication modes:
+
+    1. **ingress-replication** (default) - Uses BGP EVPN for dynamic VTEP
+       discovery and head-end replication. No explicit configuration needed.
+    2. **multicast** - Uses IP multicast groups with PIM Sparse Mode for
+       BUM replication. Requires PIM configuration on fabric.
+
+    Configuration parameters:
+
+    * ``ngs_bum_replication_mode`` - BUM replication mode (default:
+      ``ingress-replication``). Options: ``ingress-replication``,
+      ``multicast``
+    * ``ngs_mcast_group_map`` - Explicit VNI-to-multicast-group mappings
+      (format: ``vni1:group1,vni2:group2``)
+    * ``ngs_mcast_group_base`` - Base multicast group IP for automatic
+      derivation (e.g., ``239.1.1.0``)
+    * ``ngs_mcast_group_increment`` - Derivation method (default:
+      ``vni_last_octet``)
     """
     ADD_NETWORK = (
         'set vlans {network_name} vlan-id {segmentation_id}',
@@ -93,6 +116,15 @@ class Juniper(netmiko_devices.NetmikoSwitch):
         'vlan members {segmentation_id}',
     )
 
+    PLUG_MCAST_GROUP = (
+        'set vlans {vlan_name} vxlan '
+        'multicast-group {mcast_group}',
+    )
+
+    UNPLUG_MCAST_GROUP = (
+        'delete vlans {vlan_name} vxlan multicast-group',
+    )
+
     PLUG_EVPN_VRF_TARGET = (
         'set vlans {vlan_name} vrf-target '
         'target:{bgp_asn}:{vni}',
@@ -112,6 +144,13 @@ class Juniper(netmiko_devices.NetmikoSwitch):
         evpn_config = device_cfg.get('ngs_evpn_vni_config', 'false')
         self.evpn_vni_config = evpn_config.lower() in ('true', 'yes', '1')
         self.bgp_asn = device_cfg.get('ngs_bgp_asn')
+
+        # Parse multicast BUM replication configuration
+        mcast_config = device_utils.parse_vxlan_multicast_config(device_cfg)
+        self.bum_replication_mode = mcast_config.bum_replication_mode
+        self.mcast_group_base = mcast_config.mcast_group_base
+        self.mcast_group_increment = mcast_config.mcast_group_increment
+        self.mcast_group_map = mcast_config.mcast_group_map
 
         # Do not expose Juniper internal options to device config.
         juniper_cfg = {}
@@ -285,6 +324,20 @@ class Juniper(netmiko_devices.NetmikoSwitch):
                     continue
         return None
 
+    def _get_multicast_group(self, vni: int) -> str:
+        """Calculate multicast group address for a given VNI.
+
+        Delegates to shared utility function for consistent multicast
+        group derivation logic across all vendors.
+
+        :param vni: VXLAN Network Identifier
+        :returns: Multicast group IP address (e.g., '239.1.1.116')
+        :raises: GenericSwitchNetmikoConfigError if no mapping or base
+        """
+        return device_utils.get_vxlan_multicast_group(
+            vni, self.mcast_group_map, self.mcast_group_base,
+            self.device_name)
+
     def _parse_vlan_ports(self, output: str, segmentation_id: int) -> bool:
         """Parse 'show vlans' output for ports.
 
@@ -377,7 +430,17 @@ class Juniper(netmiko_devices.NetmikoSwitch):
             segmentation_id=segmentation_id,
             vlan_name=vlan_name)
 
-        # Step 2: Configure EVPN VRF target if enabled
+        # Step 2: Configure BUM replication (multicast mode only)
+        if self.bum_replication_mode == 'multicast':
+            # Use multicast group for BUM traffic
+            mcast_group = self._get_multicast_group(vni)
+            cmds.extend(self._format_commands(
+                self.PLUG_MCAST_GROUP,
+                vlan_name=vlan_name,
+                mcast_group=mcast_group))
+        # else: ingress-replication is default, no explicit config needed
+
+        # Step 3: Configure EVPN VRF target if enabled
         if self.evpn_vni_config:
             if not self.bgp_asn:
                 LOG.error(
@@ -410,14 +473,24 @@ class Juniper(netmiko_devices.NetmikoSwitch):
         # Get the VLAN name from segmentation_id
         vlan_name = self._get_vlan_name_by_id(segmentation_id)
 
-        # Step 1: Remove VXLAN VNI map
-        cmds = self._format_commands(
+        # Step 1: Remove BUM replication config (multicast mode only)
+        cmds = []
+        if self.bum_replication_mode == 'multicast':
+            # Remove multicast group
+            cmds.extend(self._format_commands(
+                self.UNPLUG_MCAST_GROUP,
+                vlan_name=vlan_name))
+        # No cleanup needed for ingress-replication (no explicit config)
+
+        # Step 2: Remove VXLAN VNI map
+        vxlan_cmds = self._format_commands(
             self.UNPLUG_SWITCH_FROM_NETWORK,
             vni=vni,
             segmentation_id=segmentation_id,
             vlan_name=vlan_name)
+        cmds.extend(vxlan_cmds)
 
-        # Step 2: Remove EVPN VRF target if it was configured
+        # Step 3: Remove EVPN VRF target if it was configured
         if self.evpn_vni_config:
             if not self.bgp_asn:
                 LOG.error(

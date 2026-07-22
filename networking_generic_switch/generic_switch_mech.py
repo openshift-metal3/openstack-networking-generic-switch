@@ -1207,7 +1207,8 @@ class GenericSwitchDriver(api.MechanismDriver):
                 ngs_mac_address=switch_id)
 
             switch.add_subports_on_trunk(
-                binding_profile, port_id, subports)
+                binding_profile, port_id, subports,
+                trunk_details=port.get('trunk_details'))
 
         core_plugin = directory.get_plugin()
 
@@ -1252,7 +1253,8 @@ class GenericSwitchDriver(api.MechanismDriver):
                 ngs_mac_address=switch_id)
 
             switch.del_subports_on_trunk(
-                binding_profile, port_id, subports)
+                binding_profile, port_id, subports,
+                trunk_details=port.get('trunk_details'))
 
         for subport in subports:
             self.cleanup_l2vni_for_subport(context, port, subport)

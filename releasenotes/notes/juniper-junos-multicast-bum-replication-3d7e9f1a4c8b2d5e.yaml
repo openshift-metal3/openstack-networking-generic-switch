@@ -1,0 +1,9 @@
+---
+features:
+  - |
+    Adds multicast BUM (Broadcast, Unknown unicast, and Multicast) traffic
+    replication support for Juniper Junos VXLAN deployments. Operators can
+    now configure multicast mode for BUM traffic using PIM Sparse Mode, in
+    addition to the default ingress-replication mode. This enables
+    integration with large-scale fabrics that have existing PIM
+    infrastructure.
