@@ -35,9 +35,10 @@ class NetconfOpenConfigSwitch(netconf_switch.NetconfSwitch):
     Manages network and port operations using OpenConfig YANG models
     over NETCONF transport.  Callable class variables (ADD_NETWORK,
     DELETE_NETWORK, ADD_NETWORK_TO_TRUNK, REMOVE_NETWORK_FROM_TRUNK,
-    PLUG_PORT_TO_NETWORK, DELETE_PORT, ENABLE_PORT, DISABLE_PORT) build
-    OpenConfig model objects that the base class serialises to XML and
-    pushes via ``send_config_to_device``.
+    PLUG_PORT_TO_NETWORK, DELETE_PORT, ENABLE_PORT, DISABLE_PORT,
+    ADD_SUBPORTS_ON_TRUNK, DEL_SUBPORTS_ON_TRUNK) build OpenConfig
+    model objects that the base class serialises to XML and pushes
+    via ``send_config_to_device``.
     """
 
     def __init__(self, device_cfg, *args, **kwargs):
@@ -192,12 +193,20 @@ class NetconfOpenConfigSwitch(netconf_switch.NetconfSwitch):
         return [ifaces]
 
     def _plug_port_to_network(self, port_id, segmentation_id, **kwargs):
-        """Build OpenConfig objects to assign an access VLAN to a port.
+        """Build OpenConfig objects to assign a VLAN to a port.
+
+        When *trunk_details* is provided the port is configured as a trunk
+        with ``native_vlan`` set to *segmentation_id* and all subport VLANs
+        in ``trunk_vlans`` using ``operation="replace"``.  Without
+        *trunk_details* the port is set to access mode (existing behaviour).
 
         :param port_id: Switch interface name.
         :param segmentation_id: VLAN ID.
+        :param trunk_details: (kwarg) Trunk information dict from the
+            parent port, or ``None``.
         :returns: list of OpenConfig model objects.
         """
+        trunk_details = kwargs.get('trunk_details')
         segmentation_id = int(segmentation_id)
         port_id = self._port_id_resub(port_id)
 
@@ -207,8 +216,20 @@ class NetconfOpenConfigSwitch(netconf_switch.NetconfSwitch):
         switched_vlan = VlanSwitchedVlan()
         switched_vlan.config.operation = (
             ncconst.NetconfEditConfigOperation.REPLACE)
-        switched_vlan.config.interface_mode = oc_constants.VLAN_MODE_ACCESS
-        switched_vlan.config.access_vlan = segmentation_id
+
+        if trunk_details:
+            switched_vlan.config.interface_mode = (
+                oc_constants.VLAN_MODE_TRUNK)
+            switched_vlan.config.native_vlan = segmentation_id
+            for sub_port in sorted(trunk_details.get('sub_ports', []),
+                                   key=lambda s: s['segmentation_id']):
+                switched_vlan.config.trunk_vlans = int(
+                    sub_port['segmentation_id'])
+        else:
+            switched_vlan.config.interface_mode = (
+                oc_constants.VLAN_MODE_ACCESS)
+            switched_vlan.config.access_vlan = segmentation_id
+
         iface.ethernet.switched_vlan = switched_vlan
 
         return [ifaces]
@@ -259,6 +280,99 @@ class NetconfOpenConfigSwitch(netconf_switch.NetconfSwitch):
 
         return [ifaces]
 
+    def _add_subports_on_trunk(self, binding_profile, port_id, subports,
+                               trunk_details=None, **kwargs):
+        """Build OpenConfig objects to add subport VLANs on a trunk port.
+
+        When *trunk_details* is provided the complete set of subport
+        VLANs is written with ``operation="replace"`` so that the device
+        converges to the desired state.  Falls back to a per-VLAN merge
+        when *trunk_details* is ``None``.
+
+        :param binding_profile: Binding profile of the parent port.
+        :param port_id: Switch interface name.
+        :param subports: List of subport dicts (delta being added).
+        :param trunk_details: Full trunk details dict from the parent
+            port, or ``None``.
+        :returns: list of OpenConfig model objects.
+        """
+        port_id = self._port_id_resub(port_id)
+
+        ifaces = Interfaces()
+        iface = ifaces.add(port_id)
+        switched_vlan = VlanSwitchedVlan()
+        switched_vlan.config.interface_mode = oc_constants.VLAN_MODE_TRUNK
+
+        if trunk_details is not None:
+            switched_vlan.config.operation = (
+                ncconst.NetconfEditConfigOperation.REPLACE)
+            native_vlan = trunk_details.get('segmentation_id')
+            if native_vlan:
+                switched_vlan.config.native_vlan = int(native_vlan)
+            for sub_port in sorted(trunk_details.get('sub_ports', []),
+                                   key=lambda s: s['segmentation_id']):
+                switched_vlan.config.trunk_vlans = int(
+                    sub_port['segmentation_id'])
+        else:
+            for sub_port in subports:
+                switched_vlan.config.trunk_vlans = int(
+                    sub_port['segmentation_id'])
+
+        iface.ethernet.switched_vlan = switched_vlan
+        return [ifaces]
+
+    def _del_subports_on_trunk(self, binding_profile, port_id, subports,
+                               trunk_details=None, **kwargs):
+        """Build OpenConfig objects to remove subport VLANs from a trunk.
+
+        When *trunk_details* is provided the remaining set of subport
+        VLANs (already excluding the deleted ones) is written with
+        ``operation="replace"``.  Falls back to per-element
+        ``operation="remove"`` when *trunk_details* is ``None``.
+
+        :param binding_profile: Binding profile of the parent port.
+        :param port_id: Switch interface name.
+        :param subports: List of subport dicts (delta being removed).
+        :param trunk_details: Full trunk details dict from the parent
+            port, or ``None``.
+        :returns: list of OpenConfig model objects.
+        """
+        port_id = self._port_id_resub(port_id)
+
+        ifaces = Interfaces()
+        iface = ifaces.add(port_id)
+        switched_vlan = VlanSwitchedVlan()
+        switched_vlan.config.interface_mode = oc_constants.VLAN_MODE_TRUNK
+
+        if trunk_details is not None:
+            switched_vlan.config.operation = (
+                ncconst.NetconfEditConfigOperation.REPLACE)
+            remaining = trunk_details.get('sub_ports', [])
+            native_vlan = trunk_details.get('segmentation_id')
+            if remaining:
+                if native_vlan:
+                    switched_vlan.config.native_vlan = int(native_vlan)
+                for sub_port in sorted(remaining,
+                                       key=lambda s: s['segmentation_id']):
+                    switched_vlan.config.trunk_vlans = int(
+                        sub_port['segmentation_id'])
+            else:
+                switched_vlan.config.interface_mode = (
+                    oc_constants.VLAN_MODE_ACCESS)
+                if native_vlan:
+                    switched_vlan.config.access_vlan = int(native_vlan)
+        else:
+            for sub_port in subports:
+                switched_vlan.config.trunk_vlans.remove(
+                    int(sub_port['segmentation_id']))
+
+        iface.ethernet.switched_vlan = switched_vlan
+        return [ifaces]
+
+    @property
+    def support_trunk_on_ports(self):
+        return True
+
     ADD_NETWORK = staticmethod(_add_network)
     DELETE_NETWORK = staticmethod(_delete_network)
     ADD_NETWORK_TO_TRUNK = staticmethod(_add_network_to_trunk)
@@ -267,3 +381,5 @@ class NetconfOpenConfigSwitch(netconf_switch.NetconfSwitch):
     DELETE_PORT = staticmethod(_delete_port)
     ENABLE_PORT = staticmethod(_enable_port)
     DISABLE_PORT = staticmethod(_disable_port)
+    ADD_SUBPORTS_ON_TRUNK = staticmethod(_add_subports_on_trunk)
+    DEL_SUBPORTS_ON_TRUNK = staticmethod(_del_subports_on_trunk)

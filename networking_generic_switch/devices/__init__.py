@@ -466,24 +466,33 @@ class GenericSwitchDevice(abc.ABC):
         return self.delete_port(bond_id, segmentation_id, **kwargs)
 
     @abc.abstractmethod
-    def add_subports_on_trunk(self, binding_profile, port_id, subports):
+    def add_subports_on_trunk(self, binding_profile, port_id, subports,
+                              trunk_details=None):
         """Allow subports on trunk
 
         :param binding_profile: Binding profile of parent port
         :param port_id: The name of the switch port from
                Local Link Information
         :param subports: List with subports objects.
+        :param trunk_details: Full trunk details dict from the parent port,
+               including all sub_ports. Used by convergence-capable drivers
+               to replace the entire trunk VLAN set atomically.
         """
         pass
 
     @abc.abstractmethod
-    def del_subports_on_trunk(self, binding_profile, port_id, subports):
-        """Allow subports on trunk
+    def del_subports_on_trunk(self, binding_profile, port_id, subports,
+                              trunk_details=None):
+        """Remove subports from trunk
 
         :param binding_profile: Binding profile of parent port
         :param port_id: The name of the switch port from
                Local Link Information
         :param subports: List with subports objects.
+        :param trunk_details: Full trunk details dict from the parent port,
+               including remaining sub_ports after deletion. Used by
+               convergence-capable drivers to replace the entire trunk
+               VLAN set atomically.
         """
         pass
 

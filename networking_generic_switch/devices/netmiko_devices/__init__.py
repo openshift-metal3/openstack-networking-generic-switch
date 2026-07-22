@@ -770,13 +770,15 @@ class NetmikoSwitch(devices.GenericSwitchDevice):
                             " reboot", self.config['device_type'])
 
     @check_output('add trunk subports')
-    def add_subports_on_trunk(self, binding_profile, port_id, subports):
+    def add_subports_on_trunk(self, binding_profile, port_id, subports,
+                              trunk_details=None):
         """Allow subports on trunk
 
         :param binding_profile: Binding profile of parent port
         :param port_id: The name of the switch port from
                Local Link Information
         :param subports: List with subports objects.
+        :param trunk_details: Unused by Netmiko drivers.
         """
         cmds = []
         is_802_3ad = ngs_utils.is_802_3ad(binding_profile)
@@ -793,13 +795,15 @@ class NetmikoSwitch(devices.GenericSwitchDevice):
         return self.send_commands_to_device(cmds)
 
     @check_output('delete trunk subports')
-    def del_subports_on_trunk(self, binding_profile, port_id, subports):
-        """Allow subports on trunk
+    def del_subports_on_trunk(self, binding_profile, port_id, subports,
+                              trunk_details=None):
+        """Remove subports from trunk
 
         :param binding_profile: Binding profile of parent port
         :param port_id: The name of the switch port from
                Local Link Information
         :param subports: List with subports objects.
+        :param trunk_details: Unused by Netmiko drivers.
         """
 
         cmds = []

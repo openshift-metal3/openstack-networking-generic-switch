@@ -52,6 +52,8 @@ class NetconfSwitch(devices.GenericSwitchDevice):
 
     ADD_NETWORK_TO_TRUNK = None
     REMOVE_NETWORK_FROM_TRUNK = None
+    ADD_SUBPORTS_ON_TRUNK = None
+    DEL_SUBPORTS_ON_TRUNK = None
     ENABLE_PORT = None
     DISABLE_PORT = None
 
@@ -472,6 +474,7 @@ class NetconfSwitch(devices.GenericSwitchDevice):
             self,
             port_id=port_id,
             segmentation_id=segmentation_id,
+            trunk_details=trunk_details,
         )
         if plug_config:
             config.extend(plug_config)
@@ -495,6 +498,7 @@ class NetconfSwitch(devices.GenericSwitchDevice):
             self,
             port_id=port_id,
             segmentation_id=segmentation_id,
+            trunk_details=trunk_details,
         )
         if unplug_config:
             config.extend(unplug_config)
@@ -574,34 +578,50 @@ class NetconfSwitch(devices.GenericSwitchDevice):
         return False
 
     #
-    # Trunks — unsupported
+    # Trunks — dispatch to subclass callables
     #
 
-    def add_subports_on_trunk(self, binding_profile, port_id, subports):
+    def add_subports_on_trunk(self, binding_profile, port_id, subports,
+                              trunk_details=None):
         """Allow subports on trunk.
 
         :param binding_profile: Binding profile of the parent port.
         :param port_id: Name of the switch port.
         :param subports: List of subport objects.
-        :raises: GenericSwitchNotSupported always.
+        :param trunk_details: Full trunk details dict from the parent port.
+        :raises: GenericSwitchNotSupported if not implemented by subclass.
         """
-        raise exc.GenericSwitchNotSupported(
-            feature='trunk subports',
-            switch=self.device_name,
-            error='NETCONF driver does not support trunk subports')
+        if not self.ADD_SUBPORTS_ON_TRUNK:
+            raise exc.GenericSwitchNotSupported(
+                feature='trunk subports',
+                switch=self.device_name,
+                error='NETCONF driver does not support trunk subports')
+        config = self.ADD_SUBPORTS_ON_TRUNK(
+            self, binding_profile=binding_profile, port_id=port_id,
+            subports=subports, trunk_details=trunk_details)
+        if config:
+            self.send_config_to_device(config)
 
-    def del_subports_on_trunk(self, binding_profile, port_id, subports):
+    def del_subports_on_trunk(self, binding_profile, port_id, subports,
+                              trunk_details=None):
         """Remove subports from trunk.
 
         :param binding_profile: Binding profile of the parent port.
         :param port_id: Name of the switch port.
         :param subports: List of subport objects.
-        :raises: GenericSwitchNotSupported always.
+        :param trunk_details: Full trunk details dict from the parent port.
+        :raises: GenericSwitchNotSupported if not implemented by subclass.
         """
-        raise exc.GenericSwitchNotSupported(
-            feature='trunk subports',
-            switch=self.device_name,
-            error='NETCONF driver does not support trunk subports')
+        if not self.DEL_SUBPORTS_ON_TRUNK:
+            raise exc.GenericSwitchNotSupported(
+                feature='trunk subports',
+                switch=self.device_name,
+                error='NETCONF driver does not support trunk subports')
+        config = self.DEL_SUBPORTS_ON_TRUNK(
+            self, binding_profile=binding_profile, port_id=port_id,
+            subports=subports, trunk_details=trunk_details)
+        if config:
+            self.send_config_to_device(config)
 
     #
     # Security groups — gated by ngs_security_groups_enabled (default False)

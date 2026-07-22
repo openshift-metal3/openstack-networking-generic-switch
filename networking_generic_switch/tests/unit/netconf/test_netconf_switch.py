@@ -708,7 +708,8 @@ class TestDispatchMethods(unittest.TestCase):
                                autospec=True) as mock_send:
             switch.delete_port('eth1/1', 100)
         switch.DELETE_PORT.assert_called_once_with(
-            switch, port_id='eth1/1', segmentation_id=100)
+            switch, port_id='eth1/1', segmentation_id=100,
+            trunk_details=None)
         switch.ADD_NETWORK.assert_called_once_with(
             switch, segmentation_id='1', network_name='1')
         switch.PLUG_PORT_TO_NETWORK.assert_called_once_with(
@@ -793,6 +794,96 @@ class TestStubMethods(unittest.TestCase):
         self.assertRaises(
             exc.GenericSwitchNotSupported,
             switch.del_subports_on_trunk, {}, 'eth1/1', [])
+
+    def test_add_subports_dispatches_callable(self):
+        switch = _make_switch()
+        config_obj = mock.Mock()
+        switch.ADD_SUBPORTS_ON_TRUNK = mock.Mock(return_value=[config_obj])
+        binding_profile = {'local_link_information': [
+            {'port_id': 'eth1/1', 'switch_info': 'test-switch'}]}
+        subports = [{'segmentation_id': 200}]
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.add_subports_on_trunk(
+                binding_profile, 'eth1/1', subports)
+        switch.ADD_SUBPORTS_ON_TRUNK.assert_called_once_with(
+            switch, binding_profile=binding_profile, port_id='eth1/1',
+            subports=subports, trunk_details=None)
+        mock_send.assert_called_once_with([config_obj])
+
+    def test_add_subports_dispatches_with_trunk_details(self):
+        switch = _make_switch()
+        config_obj = mock.Mock()
+        switch.ADD_SUBPORTS_ON_TRUNK = mock.Mock(return_value=[config_obj])
+        binding_profile = {'local_link_information': [
+            {'port_id': 'eth1/1', 'switch_info': 'test-switch'}]}
+        subports = [{'segmentation_id': 200}]
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [{'segmentation_id': 200}, {'segmentation_id': 300}],
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.add_subports_on_trunk(
+                binding_profile, 'eth1/1', subports,
+                trunk_details=trunk_details)
+        switch.ADD_SUBPORTS_ON_TRUNK.assert_called_once_with(
+            switch, binding_profile=binding_profile, port_id='eth1/1',
+            subports=subports, trunk_details=trunk_details)
+        mock_send.assert_called_once_with([config_obj])
+
+    def test_add_subports_no_send_when_callable_returns_none(self):
+        switch = _make_switch()
+        switch.ADD_SUBPORTS_ON_TRUNK = mock.Mock(return_value=None)
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.add_subports_on_trunk({}, 'eth1/1', [])
+        mock_send.assert_not_called()
+
+    def test_del_subports_dispatches_callable(self):
+        switch = _make_switch()
+        config_obj = mock.Mock()
+        switch.DEL_SUBPORTS_ON_TRUNK = mock.Mock(return_value=[config_obj])
+        binding_profile = {'local_link_information': [
+            {'port_id': 'eth1/1', 'switch_info': 'test-switch'}]}
+        subports = [{'segmentation_id': 200}]
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.del_subports_on_trunk(
+                binding_profile, 'eth1/1', subports)
+        switch.DEL_SUBPORTS_ON_TRUNK.assert_called_once_with(
+            switch, binding_profile=binding_profile, port_id='eth1/1',
+            subports=subports, trunk_details=None)
+        mock_send.assert_called_once_with([config_obj])
+
+    def test_del_subports_dispatches_with_trunk_details(self):
+        switch = _make_switch()
+        config_obj = mock.Mock()
+        switch.DEL_SUBPORTS_ON_TRUNK = mock.Mock(return_value=[config_obj])
+        binding_profile = {'local_link_information': [
+            {'port_id': 'eth1/1', 'switch_info': 'test-switch'}]}
+        subports = [{'segmentation_id': 200}]
+        trunk_details = {
+            'segmentation_id': 100,
+            'sub_ports': [{'segmentation_id': 300}],
+        }
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.del_subports_on_trunk(
+                binding_profile, 'eth1/1', subports,
+                trunk_details=trunk_details)
+        switch.DEL_SUBPORTS_ON_TRUNK.assert_called_once_with(
+            switch, binding_profile=binding_profile, port_id='eth1/1',
+            subports=subports, trunk_details=trunk_details)
+        mock_send.assert_called_once_with([config_obj])
+
+    def test_del_subports_no_send_when_callable_returns_none(self):
+        switch = _make_switch()
+        switch.DEL_SUBPORTS_ON_TRUNK = mock.Mock(return_value=None)
+        with mock.patch.object(switch, 'send_config_to_device',
+                               autospec=True) as mock_send:
+            switch.del_subports_on_trunk({}, 'eth1/1', [])
+        mock_send.assert_not_called()
 
     def test_security_group_methods_are_noop(self):
         switch = _make_switch()

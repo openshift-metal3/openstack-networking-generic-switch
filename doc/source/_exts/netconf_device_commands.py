@@ -27,6 +27,39 @@ EXAMPLE_NETWORK_NAME = 'aabbccdd11223344aabbccdd11223344'
 EXAMPLE_PORT_ID = 'Ethernet1/1'
 EXAMPLE_TRUNK_PORTS = ['Ethernet1/48']
 
+EXAMPLE_BINDING_PROFILE = {
+    'local_link_information': [
+        {'switch_id': '00:11:22:33:44:55', 'port_id': 'Ethernet1/1',
+         'switch_info': 'example-switch'}
+    ]
+}
+EXAMPLE_SUBPORTS = [
+    {'segmentation_id': 200, 'segmentation_type': 'vlan',
+     'port_id': 'subport-uuid-1'},
+    {'segmentation_id': 201, 'segmentation_type': 'vlan',
+     'port_id': 'subport-uuid-2'},
+]
+EXAMPLE_TRUNK_DETAILS = {
+    'trunk_id': 'trunk-uuid',
+    'segmentation_id': EXAMPLE_SEGMENTATION_ID,
+    'sub_ports': [
+        {'segmentation_id': 200, 'segmentation_type': 'vlan',
+         'port_id': 'subport-uuid-1'},
+        {'segmentation_id': 201, 'segmentation_type': 'vlan',
+         'port_id': 'subport-uuid-2'},
+        {'segmentation_id': 202, 'segmentation_type': 'vlan',
+         'port_id': 'subport-uuid-3'},
+    ],
+}
+EXAMPLE_TRUNK_DETAILS_AFTER_DELETE = {
+    'trunk_id': 'trunk-uuid',
+    'segmentation_id': EXAMPLE_SEGMENTATION_ID,
+    'sub_ports': [
+        {'segmentation_id': 202, 'segmentation_type': 'vlan',
+         'port_id': 'subport-uuid-3'},
+    ],
+}
+
 OPERATIONS = [
     {
         'name': 'ADD_NETWORK',
@@ -96,6 +129,43 @@ OPERATIONS = [
         'method': '_disable_port',
         'kwargs': {
             'port_id': EXAMPLE_PORT_ID,
+        },
+    },
+    {
+        'name': 'ADD_SUBPORTS_ON_TRUNK',
+        'description':
+            'Add subport VLANs to a trunk port (converging with '
+            'trunk_details)',
+        'method': '_add_subports_on_trunk',
+        'kwargs': {
+            'binding_profile': EXAMPLE_BINDING_PROFILE,
+            'port_id': EXAMPLE_PORT_ID,
+            'subports': EXAMPLE_SUBPORTS,
+            'trunk_details': EXAMPLE_TRUNK_DETAILS,
+        },
+    },
+    {
+        'name': 'DEL_SUBPORTS_ON_TRUNK',
+        'description':
+            'Remove subport VLANs from a trunk port (converging '
+            'with trunk_details showing remaining subports)',
+        'method': '_del_subports_on_trunk',
+        'kwargs': {
+            'binding_profile': EXAMPLE_BINDING_PROFILE,
+            'port_id': EXAMPLE_PORT_ID,
+            'subports': EXAMPLE_SUBPORTS,
+            'trunk_details': EXAMPLE_TRUNK_DETAILS_AFTER_DELETE,
+        },
+    },
+    {
+        'name': 'PLUG_PORT_TO_NETWORK (trunk)',
+        'description':
+            'Assign a trunk port with native VLAN and subport VLANs',
+        'method': '_plug_port_to_network',
+        'kwargs': {
+            'port_id': EXAMPLE_PORT_ID,
+            'segmentation_id': EXAMPLE_SEGMENTATION_ID,
+            'trunk_details': EXAMPLE_TRUNK_DETAILS,
         },
     },
 ]
