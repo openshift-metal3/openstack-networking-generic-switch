@@ -81,6 +81,22 @@ NGS_INTERNAL_OPTS = [
     {'name': 'ngs_netconf_confirmed_commit', 'default': True},
     # Rollback timeout (seconds) for the tentative confirmed commit.
     {'name': 'ngs_netconf_confirmed_commit_timeout', 'default': 5},
+    # Master toggle for MTU management. Must be True for any MTU
+    # configuration to take effect. Default False preserves the
+    # pre-existing behavior of never touching port MTU.
+    {'name': 'ngs_manage_mtu', 'default': False},
+    # Default MTU for access/bound ports. Used as fallback when network
+    # MTU is missing/zero and as reset value on port unbind. Neutron ML2
+    # networks always have MTU (DB enforces non-null), but fallback supports
+    # standalone usage and direct driver invocation.
+    {'name': 'ngs_port_default_mtu'},
+    # MTU to apply on trunk (uplink) ports. Also serves as the upper
+    # bound for access port MTU validation.
+    {'name': 'ngs_trunk_port_mtu'},
+    # If True, bounce (shutdown then no shutdown) ports during bind
+    # to trigger a carrier drop/raise, signalling the host to re-run
+    # DHCP. Ports remain UP when not bound, preserving LLDP.
+    {'name': 'ngs_bounce_ports_on_plug', 'default': False},
 ]
 
 EM_SEMAPHORE = 'ngs_device_manager'
@@ -189,6 +205,25 @@ class GenericSwitchDevice(abc.ABC):
         """Return a default vlan of switch's interface if you specify."""
         return self.ngs_config.get('ngs_port_default_vlan', None)
 
+    def _manage_mtu(self):
+        """Return whether MTU management is enabled."""
+        return strutils.bool_from_string(
+            self.ngs_config['ngs_manage_mtu'])
+
+    def _get_port_default_mtu(self):
+        """Return the default MTU for access ports, or None."""
+        mtu = self.ngs_config.get('ngs_port_default_mtu')
+        if mtu is not None:
+            return int(mtu)
+        return None
+
+    def _get_trunk_port_mtu(self):
+        """Return the MTU for trunk ports, or None."""
+        mtu = self.ngs_config.get('ngs_trunk_port_mtu')
+        if mtu is not None:
+            return int(mtu)
+        return None
+
     def get_physical_networks(self):
         """Return a list of physical networks mapped to this switch."""
         physnets = self.ngs_config.get('ngs_physical_networks')
@@ -200,6 +235,11 @@ class GenericSwitchDevice(abc.ABC):
         """Return whether inactive ports should be disabled."""
         return strutils.bool_from_string(
             self.ngs_config['ngs_disable_inactive_ports'])
+
+    def _bounce_ports_on_plug(self):
+        """Return whether ports should be bounced during bind."""
+        return strutils.bool_from_string(
+            self.ngs_config['ngs_bounce_ports_on_plug'])
 
     def _get_save_configuration(self):
         """Return whether configuration should be saved on device."""
@@ -401,7 +441,8 @@ class GenericSwitchDevice(abc.ABC):
 
     @abc.abstractmethod
     def plug_port_to_network(self, port_id, segmentation_id,
-                             trunk_details=None, default_vlan=None):
+                             trunk_details=None, default_vlan=None,
+                             mtu=None):
         """Plug port into network.
 
         :param port_id: The name of the switch interface
@@ -410,12 +451,13 @@ class GenericSwitchDevice(abc.ABC):
 
         :param trunk_details: trunk information if port is a part of trunk
         :param default_vlan: Default VLAN identifier if port is not configured
+        :param mtu: MTU to set on the port, overrides config default
         """
         pass
 
     @abc.abstractmethod
     def delete_port(self, port_id, segmentation_id, trunk_details=None,
-                    default_vlan=None):
+                    default_vlan=None, mtu=None):
         """Delete port from specific network.
 
         :param port_id: The name of the switch interface
@@ -424,11 +466,13 @@ class GenericSwitchDevice(abc.ABC):
 
         :param trunk_details: trunk information if port is a part of trunk
         :param default_vlan: Default VLAN identifier if port is not configured
+        :param mtu: MTU to reset on the port, overrides config default
         """
         pass
 
     def plug_bond_to_network(self, bond_id, segmentation_id,
-                             trunk_details=None, default_vlan=None):
+                             trunk_details=None, default_vlan=None,
+                             mtu=None):
         """Plug bond port into network.
 
         :param port_id: The name of the switch interface
@@ -437,17 +481,21 @@ class GenericSwitchDevice(abc.ABC):
 
         :param trunk_details: trunk information if port is a part of trunk
         :param default_vlan: Default VLAN identifier if port is not configured
+        :param mtu: MTU to set on the port, overrides config default
         """
         kwargs = {}
         if trunk_details:
             kwargs["trunk_details"] = trunk_details
         if default_vlan:
             kwargs["default_vlan"] = default_vlan
+        if mtu:
+            kwargs["mtu"] = mtu
         # Fall back to interface method.
         return self.plug_port_to_network(bond_id, segmentation_id, **kwargs)
 
     def unplug_bond_from_network(self, bond_id, segmentation_id,
-                                 trunk_details=None, default_vlan=None):
+                                 trunk_details=None, default_vlan=None,
+                                 mtu=None):
         """Unplug bond port from network.
 
         :param port_id: The name of the switch interface
@@ -456,12 +504,15 @@ class GenericSwitchDevice(abc.ABC):
 
         :param trunk_details: trunk information if port is a part of trunk
         :param default_vlan: Default VLAN identifier if port is not configured
+        :param mtu: MTU to reset on the port, overrides config default
         """
         kwargs = {}
         if trunk_details:
             kwargs["trunk_details"] = trunk_details
         if default_vlan:
             kwargs["default_vlan"] = default_vlan
+        if mtu:
+            kwargs["mtu"] = mtu
         # Fall back to interface method.
         return self.delete_port(bond_id, segmentation_id, **kwargs)
 

@@ -80,6 +80,20 @@ class InterfacesEthernetConfig:
                 xmlns=self._aggregate_id_namespace)
         return element
 
+    def to_restconf_dict(self):
+        """Serialize to RESTCONF JSON (RFC 7951) dict.
+
+        :return: dict suitable for RESTCONF PATCH/PUT payload
+        """
+        result = {}
+        if self.aggregate_id is not None:
+            result['openconfig-if-aggregate:aggregate-id'] = self.aggregate_id
+        return result
+
+    def to_restconf_path(self):
+        """Return the RESTCONF API path segment for this node."""
+        return self.TAG
+
 
 class InterfacesEthernet:
     """Ethernet configuration and state"""
@@ -134,3 +148,26 @@ class InterfacesEthernet:
         if self.switched_vlan:
             elem.append(self.switched_vlan.to_xml_element())
         return elem
+
+    def to_restconf_dict(self):
+        """Serialize to RESTCONF JSON (RFC 7951) dict.
+
+        Uses 'openconfig-if-ethernet:ethernet' as the module-prefixed key
+        when nested under interface.
+
+        :return: dict suitable for RESTCONF PATCH/PUT payload
+        """
+        result = {}
+        if self.config:
+            config_dict = self.config.to_restconf_dict()
+            if config_dict:
+                result['config'] = config_dict
+        if self.switched_vlan:
+            sv_dict = self.switched_vlan.to_restconf_dict()
+            if sv_dict:
+                result['openconfig-vlan:switched-vlan'] = sv_dict
+        return result
+
+    def to_restconf_path(self):
+        """Return the RESTCONF API path segment for this augmentation node."""
+        return 'openconfig-if-ethernet:ethernet'

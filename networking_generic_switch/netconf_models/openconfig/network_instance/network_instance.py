@@ -10,6 +10,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 from collections import abc
+from urllib.parse import quote
 from xml.etree import ElementTree
 
 from networking_generic_switch.netconf_models.openconfig.vlan import vlan
@@ -59,6 +60,27 @@ class NetworkInstances(abc.Collection):
         for instance in self.network_instances:
             elem.append(instance.to_xml_element())
         return elem
+
+    def to_restconf_dict(self):
+        """Serialize to RESTCONF JSON (RFC 7951) dict.
+
+        Returns the network-instances container with module prefix
+        at the top level.
+
+        :return: dict suitable for RESTCONF PATCH/PUT payload
+        """
+        instance_list = []
+        for instance in self.network_instances:
+            instance_list.append(instance.to_restconf_dict())
+        return {
+            'openconfig-network-instance:network-instances': {
+                'network-instance': instance_list
+            }
+        }
+
+    def to_restconf_path(self):
+        """Return the RESTCONF API path segment for this container."""
+        return 'openconfig-network-instance:network-instances'
 
 
 class NetworkInstance:
@@ -118,3 +140,20 @@ class NetworkInstance:
         if self.vlans:
             elem.append(self.vlans.to_xml_element())
         return elem
+
+    def to_restconf_dict(self):
+        """Serialize to RESTCONF JSON (RFC 7951) dict.
+
+        :return: dict suitable for RESTCONF PATCH/PUT payload
+        """
+        result = {'name': self.name}
+        if self.vlans:
+            vlans_dict = self.vlans.to_restconf_dict()
+            vlan_key = 'openconfig-vlan:vlans'
+            if vlan_key in vlans_dict:
+                result['openconfig-vlan:vlans'] = vlans_dict[vlan_key]
+        return result
+
+    def to_restconf_path(self):
+        """Return the RESTCONF API path segment for this list entry."""
+        return 'network-instance={}'.format(quote(self.name, safe=''))
