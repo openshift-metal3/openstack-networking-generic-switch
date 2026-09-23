@@ -66,46 +66,21 @@ These example device configuration snippets are assumed to be part of a
 specific file ``/etc/neutron/plugins/ml2/ml2_conf_genericswitch.ini``, but
 they could also be added directly to ``/etc/neutron/plugins/ml2/ml2_conf.ini``.
 
-Shared NGS options
-------------------
+NGS options
+-----------
 
-These options apply to all device drivers:
+Every switch section accepts a set of ``ngs_`` options that apply across
+device drivers. See :ref:`configuration-reference` for the complete list
+with each option's type and default. A few options have extra context
+documented elsewhere:
 
-* ``ngs_mac_address`` — MAC address of the switch for identification via
-  ``local_link_connection/switch_info``.
-* ``ngs_physical_networks`` — comma-separated list of physical networks
-  this switch belongs to.
-* ``ngs_manage_vlans`` — if ``False``, the driver will not create or delete
-  VLANs on the switch (default: ``True``).
-* ``ngs_allowed_vlans`` — comma-separated list of allowed VLAN IDs. If set,
-  only listed VLANs will be configured.
-* ``ngs_allowed_ports`` — comma-separated list of allowed port names. If set,
-  only listed ports will be configured.
-* ``ngs_max_connections`` — maximum number of concurrent sessions to the
-  device (default: ``1``). Used with the coordination lock pool.
-* ``ngs_network_name_format`` — Python format string for VLAN names on the
-  switch (default: ``{network_id}``). Accepts ``{network_id}`` and
-  ``{segmentation_id}`` placeholders.
-* ``ngs_trunk_ports`` — comma-separated list of interfaces to be tagged with
-  each VLAN when created (e.g. ``Ethernet1/48, Port-channel1``).
-* ``ngs_port_default_vlan`` — VLAN to restore on a port when it is released.
-* ``ngs_switchport_mode`` — switchport mode to use (default: ``access``).
-  Some devices support ``general``.
-* ``ngs_disable_inactive_ports`` — if ``True``, administratively shut down
-  ports that are not in use (default: ``False``).
-* ``ngs_security_groups_enabled`` — if ``True``, enable security group
-  support on this device (default: ``False``).
-* ``ngs_save_configuration`` — if ``False``, skip saving configuration to
-  persistent storage after each change (default: ``True``). For NETCONF
-  devices targeting the running datastore, this controls whether the driver
-  attempts to persist the configuration (see :ref:`netconf-persistence`).
-* ``ngs_manage_mtu`` — if ``True``, allow the driver to set port MTU
-  (default: ``False``). Must be enabled before any MTU commands are sent to
+* ``ngs_mac_address`` — lets a switch be identified by MAC address when
+  ``local_link_connection/switch_info`` is not set (see the note above).
+* ``ngs_manage_mtu`` — must be enabled before any MTU commands are sent to
   the switch. See :doc:`admin/general-configuration` for details.
-* ``ngs_port_default_mtu`` — default MTU applied to access/bound ports when
-  the Neutron network has no MTU set, and the value restored on unbind.
-* ``ngs_trunk_port_mtu`` — MTU applied to trunk (uplink) ports; also the
-  upper bound used to validate access port MTU.
+* ``ngs_save_configuration`` — for NETCONF devices targeting the running
+  datastore, this controls whether the driver attempts to persist the
+  configuration (see :ref:`netconf-persistence`).
 
 Netmiko (SSH/CLI) Devices
 -------------------------
@@ -125,18 +100,12 @@ Switch configuration format::
     ngs_allowed_vlans = <comma-separated list of allowed vlans for switch>
     ngs_allowed_ports = <comma-separated list of allowed ports for switch>
 
-Netmiko-specific NGS options:
-
-* ``ngs_batch_requests`` — if ``True``, batch concurrent switch requests
-  into a single SSH session (default: ``False``). Requires etcd coordination.
-* ``ngs_ssh_disabled_algorithms`` — comma-separated list of
-  ``<type>:<algorithm>`` entries to disable during SSH negotiation.
-* ``ngs_ssh_connect_timeout`` — SSH connection timeout in seconds
-  (default: ``60``).
-* ``ngs_ssh_connect_interval`` — interval between SSH connection retries in
-  seconds (default: ``10``).
-* ``ngs_ssh_reuse_connection`` — if ``True``, reuse SSH connections across
-  requests (default: ``False``).
+Netmiko (SSH/CLI) devices accept several additional ``ngs_`` options
+controlling SSH connection behaviour and request batching
+(``ngs_batch_requests``, ``ngs_ssh_connect_timeout``,
+``ngs_ssh_reuse_connection`` and others). See :ref:`configuration-reference`
+for the full list. Note that ``ngs_batch_requests`` requires etcd
+coordination; see :ref:`batching`.
 
 Examples
 ^^^^^^^^
@@ -360,33 +329,25 @@ Switch configuration format::
 NETCONF-specific NGS options
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-* ``ngs_openconfig_network_instance`` — OpenConfig network-instance
-  for VLAN management (default: ``default``).
-* ``ngs_port_id_re_sub`` — JSON object with ``pattern``
-  and ``repl`` keys for regex substitution on port IDs from LLDP.
-  Example: ``{"pattern": "^Eth", "repl": "Ethernet"}``
-* ``ngs_openconfig_disabled_properties`` — comma-separated list of
-  properties to omit from configuration payloads
-  (e.g. ``port_mtu``).
-* ``ngs_netconf_target`` — force the NETCONF datastore target to
-  ``candidate`` or ``running``. When unset (the default) the driver
-  auto-detects from the server's capabilities. Override this when the
-  device's candidate datastore is known to be unreliable.
+NETCONF devices accept additional ``ngs_`` options such as
+``ngs_openconfig_network_instance``, ``ngs_port_id_re_sub`` and
+``ngs_openconfig_disabled_properties``. See :ref:`configuration-reference`
+for the full list with types and defaults. Datastore selection
+(``ngs_netconf_target``) and configuration persistence
+(``ngs_netconf_save_config``) are covered in detail below.
+
+The confirmed-commit options warrant additional operational context:
+
 * ``ngs_netconf_confirmed_commit`` — whether to use confirmed commit when the
-  switch advertises the ``:confirmed-commit`` capability (default: ``true``).
-  Set to ``false`` to skip the tentative commit entirely. This is useful for
-  switches that hold their config backend busy for the full timeout window
-  (e.g. Cisco NX-OS), blocking concurrent sessions.
+  switch advertises the ``:confirmed-commit`` capability. Set to ``false`` to
+  skip the tentative commit entirely. This is useful for switches that hold
+  their config backend busy for the full timeout window (e.g. Cisco NX-OS),
+  blocking concurrent sessions.
 * ``ngs_netconf_confirmed_commit_timeout`` — rollback timeout in seconds for
-  the tentative confirmed commit, integer between 1 and 30 (default: ``5``).
-  Only used when confirmed commit is enabled and the switch advertises the
-  capability. The confirming commit is sent immediately after the tentative
-  commit, so a small value is usually sufficient.
-* ``ngs_netconf_save_config`` — XML config payload sent via ``edit-config``
-  to the running datastore to persist the configuration. Only used when
-  ``ngs_save_configuration`` is enabled and the target datastore is
-  ``running``. Takes priority over the standard ``copy-config`` to startup.
-  See :ref:`netconf-persistence` for vendor-specific examples.
+  the tentative confirmed commit. Only used when confirmed commit is enabled
+  and the switch advertises the capability. The confirming commit is sent
+  immediately after the tentative commit, so a small value is usually
+  sufficient.
 
 .. _netconf-datastore-selection:
 
@@ -466,6 +427,161 @@ datastore due to known candidate datastore issues)::
     ngs_netconf_target = running
     ngs_save_configuration = true
     ngs_netconf_save_config = <config><commands xmlns="http://arista.com/yang/cli"><command>write memory</command></commands></config>
+    host = <switch mgmt ip address>
+    username = admin
+    password = password
+
+.. _restconf-devices:
+
+RESTCONF Devices
+----------------
+
+RESTCONF devices use the RESTCONF protocol
+(`RFC 8040 <https://datatracker.ietf.org/doc/html/rfc8040>`_) over HTTPS
+to push configuration encoded as JSON (RFC 7951). The driver communicates
+with the device using HTTP PATCH (merge), GET (read), and DELETE (remove)
+operations against the device's RESTCONF data resource.
+
+Switch configuration format::
+
+    [genericswitch:<switch name>]
+    device_type = <restconf device type>
+    ngs_mac_address = <switch mac address>
+    ngs_physical_networks = <comma-separated list of physical networks>
+    host = <IP address or hostname of switch>
+    username = <credential username>
+    password = <credential password>
+
+.. _restconf-specific-options:
+
+RESTCONF-specific NGS options
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+* ``ngs_restconf_scheme`` — URL scheme for the RESTCONF endpoint
+  (default: ``https``).
+* ``port`` — TCP port for the RESTCONF endpoint
+  (default: ``443``). This is a standard device config option (not
+  ``ngs_``-prefixed), consistent with the NETCONF and Netmiko drivers.
+* ``ngs_restconf_content_type`` — Media type used in ``Content-Type``
+  and ``Accept`` headers (default: ``application/yang-data+json``).
+  Override to ``application/yang.data+json`` for Cisco NX-OS
+  (see :ref:`restconf-nxos-quirks`).
+* ``ngs_restconf_base_path`` — Base path for RESTCONF data resources
+  (default: ``/restconf/data``).
+* ``ngs_verify_ssl`` — Whether to verify the server's TLS
+  certificate (default: ``True``).
+* ``ngs_openconfig_network_instance`` — OpenConfig network-instance
+  for VLAN management (default: ``default``).
+* ``ngs_port_id_re_sub`` — JSON object with ``pattern``
+  and ``repl`` keys for regex substitution on port IDs from LLDP.
+  Example: ``{"pattern": "^Eth", "repl": "Ethernet"}``
+* ``ngs_openconfig_disabled_properties`` — comma-separated list of
+  properties to omit from configuration payloads
+  (e.g. ``port_mtu``).
+
+Retry Behavior
+^^^^^^^^^^^^^^
+
+If the RESTCONF device returns HTTP 409 (Conflict) or 503 (Service
+Unavailable), or a connection error occurs, the driver retries with
+exponential back-off (2 s, 4 s, 5 s, ..., up to 10 attempts). This
+handles transient lock contention from concurrent operations or
+temporary unavailability during device-internal commits.
+
+Coordination
+^^^^^^^^^^^^
+
+The RESTCONF driver uses the same ``PoolLock`` coordination mechanism
+as the NETCONF and Netmiko drivers. Configure the coordination backend
+and ``ngs_max_connections`` as described in the :ref:`synchronization`
+section of the administration guide.
+
+.. _restconf-trunk-behavior:
+
+Trunk Behavior
+^^^^^^^^^^^^^^
+
+The RESTCONF OpenConfig driver supports both infrastructure trunk ports
+(``ngs_trunk_ports``) and Neutron trunk ports (parent + subports). Both
+use a converging approach:
+
+**Infrastructure trunk ports** — When a VLAN is created, if
+``physnet_vlans`` is available (the full set of VLANs on the physical
+network), the driver writes the complete trunk VLAN list with
+``operation="replace"`` in a single PATCH request. This ensures the
+switch converges to the exact desired state. If ``physnet_vlans`` is
+unavailable, the driver falls back to a single-VLAN merge.
+
+**Neutron trunk subports** — When ``trunk_details`` is provided (the full
+trunk state including all subports), the driver writes the complete set
+of subport VLANs and native VLAN in a single ``operation="replace"``
+PATCH. When ``trunk_details`` is ``None`` (older Neutron releases), it
+falls back to per-VLAN merge (add) or per-element remove (delete).
+
+When all subports are removed from a trunk, the port automatically
+reverts from trunk mode to access mode with the parent VLAN as the
+access VLAN.
+
+.. _restconf-nxos-quirks:
+
+NX-OS Quirks
+^^^^^^^^^^^^
+
+Cisco NX-OS uses a non-standard Content-Type for its RESTCONF
+implementation. The standard RFC 8040 media type is
+``application/yang-data+json``, but NX-OS requires the older
+draft-era ``application/yang.data+json`` (note the dot instead of
+hyphen). Configure this as follows::
+
+    ngs_restconf_content_type = application/yang.data+json
+
+Additionally, NX-OS port names from LLDP may use abbreviated forms
+(e.g. ``Eth1/31`` instead of ``Ethernet1/31``). Use
+``ngs_port_id_re_sub`` to normalize::
+
+    ngs_port_id_re_sub = {"pattern": "^Eth", "repl": "Ethernet"}
+
+Examples
+^^^^^^^^
+
+For a RESTCONF OpenConfig device (e.g. Arista EOS with RESTCONF
+enabled)::
+
+    [genericswitch:sw-hostname]
+    device_type = restconf_openconfig
+    ngs_mac_address = <switch mac address>
+    ngs_physical_networks = physnet1
+    ngs_trunk_ports = Ethernet1/48
+    ngs_disable_inactive_ports = True
+    ngs_port_default_vlan = 1
+    host = <switch mgmt ip address>
+    username = admin
+    password = password
+
+For a Cisco NX-OS device via RESTCONF::
+
+    [genericswitch:nxos-hostname]
+    device_type = restconf_openconfig
+    ngs_mac_address = <switch mac address>
+    ngs_physical_networks = physnet1
+    ngs_trunk_ports = Ethernet1/48
+    ngs_disable_inactive_ports = True
+    ngs_port_default_vlan = 1
+    ngs_restconf_content_type = application/yang.data+json
+    ngs_port_id_re_sub = {"pattern": "^Eth", "repl": "Ethernet"}
+    host = <switch mgmt ip address>
+    username = admin
+    password = password
+
+For a device using HTTP (lab only, no TLS)::
+
+    [genericswitch:lab-switch]
+    device_type = restconf_openconfig
+    ngs_mac_address = <switch mac address>
+    ngs_physical_networks = physnet1
+    ngs_restconf_scheme = http
+    port = 8080
+    ngs_verify_ssl = False
     host = <switch mgmt ip address>
     username = admin
     password = password
