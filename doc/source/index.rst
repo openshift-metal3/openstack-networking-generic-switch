@@ -7,12 +7,14 @@ Welcome to networking-generic-switch's documentation!
    compatible-devices
    installation
    configuration
+   configuration-reference
    management-interfaces
    admin/index
    dev/dev-quickstart
    contributing
    netmiko-device-commands
    netconf-device-commands
+   restconf-device-commands
    contributor/api/modules
 
 .. toctree::

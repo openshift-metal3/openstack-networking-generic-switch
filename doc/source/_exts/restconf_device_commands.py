@@ -11,7 +11,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import xml.dom.minidom
+import json
 
 from docutils import nodes
 from docutils.parsers import rst
@@ -65,6 +65,7 @@ OPERATIONS = [
         'name': 'ADD_NETWORK',
         'description': 'Create a VLAN on the device',
         'method': '_add_network',
+        'http_method': 'PATCH',
         'kwargs': {
             'segmentation_id': EXAMPLE_SEGMENTATION_ID,
             'network_name': EXAMPLE_NETWORK_NAME,
@@ -74,6 +75,7 @@ OPERATIONS = [
         'name': 'DELETE_NETWORK',
         'description': 'Remove a VLAN from the device',
         'method': '_delete_network',
+        'http_method': 'PATCH',
         'kwargs': {
             'segmentation_id': EXAMPLE_SEGMENTATION_ID,
             'network_name': EXAMPLE_NETWORK_NAME,
@@ -83,6 +85,7 @@ OPERATIONS = [
         'name': 'ADD_NETWORK_TO_TRUNK',
         'description': 'Tag trunk ports with a VLAN when a network is created',
         'method': '_add_network_to_trunk',
+        'http_method': 'PUT',
         'kwargs': {
             'segmentation_id': EXAMPLE_SEGMENTATION_ID,
             'trunk_ports': EXAMPLE_TRUNK_PORTS,
@@ -92,6 +95,7 @@ OPERATIONS = [
         'name': 'REMOVE_NETWORK_FROM_TRUNK',
         'description': 'Untag trunk ports when a network is deleted',
         'method': '_remove_network_from_trunk',
+        'http_method': 'PUT',
         'kwargs': {
             'segmentation_id': EXAMPLE_SEGMENTATION_ID,
             'trunk_ports': EXAMPLE_TRUNK_PORTS,
@@ -101,6 +105,7 @@ OPERATIONS = [
         'name': 'PLUG_PORT_TO_NETWORK',
         'description': 'Assign an access VLAN to a port',
         'method': '_plug_port_to_network',
+        'http_method': 'PUT',
         'kwargs': {
             'port_id': EXAMPLE_PORT_ID,
             'segmentation_id': EXAMPLE_SEGMENTATION_ID,
@@ -110,6 +115,7 @@ OPERATIONS = [
         'name': 'DELETE_PORT',
         'description': 'Remove VLAN configuration from a port',
         'method': '_delete_port',
+        'http_method': 'PUT',
         'kwargs': {
             'port_id': EXAMPLE_PORT_ID,
             'segmentation_id': EXAMPLE_SEGMENTATION_ID,
@@ -119,6 +125,7 @@ OPERATIONS = [
         'name': 'ENABLE_PORT',
         'description': 'Administratively enable a port',
         'method': '_enable_port',
+        'http_method': 'PATCH',
         'kwargs': {
             'port_id': EXAMPLE_PORT_ID,
         },
@@ -127,6 +134,7 @@ OPERATIONS = [
         'name': 'DISABLE_PORT',
         'description': 'Administratively disable a port',
         'method': '_disable_port',
+        'http_method': 'PATCH',
         'kwargs': {
             'port_id': EXAMPLE_PORT_ID,
         },
@@ -137,6 +145,7 @@ OPERATIONS = [
             'Add subport VLANs to a trunk port (converging with '
             'trunk_details)',
         'method': '_add_subports_on_trunk',
+        'http_method': 'PUT',
         'kwargs': {
             'binding_profile': EXAMPLE_BINDING_PROFILE,
             'port_id': EXAMPLE_PORT_ID,
@@ -150,6 +159,7 @@ OPERATIONS = [
             'Remove subport VLANs from a trunk port (converging '
             'with trunk_details showing remaining subports)',
         'method': '_del_subports_on_trunk',
+        'http_method': 'PUT',
         'kwargs': {
             'binding_profile': EXAMPLE_BINDING_PROFILE,
             'port_id': EXAMPLE_PORT_ID,
@@ -162,6 +172,7 @@ OPERATIONS = [
         'description':
             'Assign a trunk port with native VLAN and subport VLANs',
         'method': '_plug_port_to_network',
+        'http_method': 'PUT',
         'kwargs': {
             'port_id': EXAMPLE_PORT_ID,
             'segmentation_id': EXAMPLE_SEGMENTATION_ID,
@@ -171,17 +182,13 @@ OPERATIONS = [
 ]
 
 
-def _pretty_xml(xml_string):
-    """Pretty-print XML with indentation, stripping the declaration."""
-    dom = xml.dom.minidom.parseString(xml_string)
-    pretty = dom.toprettyxml(indent='  ')
-    lines = pretty.splitlines()
-    # Skip the XML declaration line
-    return '\n'.join(line for line in lines[1:] if line.strip())
+def _pretty_json(data):
+    """Pretty-print JSON with indentation."""
+    return json.dumps(data, indent=2)
 
 
 def _build_fake_config(device_type):
-    """Build minimal device config to instantiate a NETCONF driver."""
+    """Build minimal device config to instantiate a RESTCONF driver."""
     return {
         'device_type': device_type,
         'host': '192.0.2.10',
@@ -190,8 +197,8 @@ def _build_fake_config(device_type):
     }
 
 
-class NetconfDeviceCommandsDirective(rst.Directive):
-    """Sphinx directive to render NETCONF device XML payloads."""
+class RestconfDeviceCommandsDirective(rst.Directive):
+    """Sphinx directive to render RESTCONF device JSON payloads."""
 
     def run(self):
         manager = stevedore.ExtensionManager(
@@ -202,7 +209,7 @@ class NetconfDeviceCommandsDirective(rst.Directive):
         output_lines = ViewList()
 
         for ext in manager.extensions:
-            if not ext.name.startswith('netconf_'):
+            if not ext.name.startswith('restconf_'):
                 continue
 
             switch_class = ext.plugin
@@ -219,15 +226,8 @@ class NetconfDeviceCommandsDirective(rst.Directive):
                     output_lines.append(line.strip(), '')
                 output_lines.append('', '')
 
-            # Instantiate with fake config
-            try:
-                cfg = _build_fake_config(device_type)
-                instance = switch_class(cfg, 'example-switch')
-            except Exception as e:
-                output_lines.append(
-                    f'*Could not instantiate driver: {e}*', '')
-                output_lines.append('', '')
-                continue
+            cfg = _build_fake_config(device_type)
+            instance = switch_class(cfg, 'example-switch')
 
             for op in OPERATIONS:
                 method = getattr(instance, op['method'], None)
@@ -239,19 +239,24 @@ class NetconfDeviceCommandsDirective(rst.Directive):
                 output_lines.append(op['description'], '')
                 output_lines.append('', '')
 
-                try:
-                    result = method(**op['kwargs'])
-                    if result:
-                        xml_str = yutils.config_to_xml(result)
-                        pretty = _pretty_xml(xml_str)
-                        output_lines.append('.. code-block:: xml', '')
-                        output_lines.append('', '')
-                        for line in pretty.splitlines():
-                            output_lines.append(f'   {line}', '')
-                        output_lines.append('', '')
-                except Exception as e:
+                result = method(**op['kwargs'])
+                if not result:
+                    continue
+
+                http_method = op['http_method']
+                restconf_data = yutils.config_to_restconf_json(result)
+                for container_key, container_data in (
+                        restconf_data.items()):
+                    url_path = f'/restconf/data/{container_key}'
                     output_lines.append(
-                        f'*Error generating XML: {e}*', '')
+                        f'``{http_method} {url_path}``', '')
+                    output_lines.append('', '')
+                    pretty = _pretty_json(container_data)
+                    output_lines.append(
+                        '.. code-block:: json', '')
+                    output_lines.append('', '')
+                    for line in pretty.splitlines():
+                        output_lines.append(f'   {line}', '')
                     output_lines.append('', '')
 
         node = nodes.section()
@@ -261,4 +266,5 @@ class NetconfDeviceCommandsDirective(rst.Directive):
 
 
 def setup(app):
-    app.add_directive('netconf-device-commands', NetconfDeviceCommandsDirective)
+    app.add_directive(
+        'restconf-device-commands', RestconfDeviceCommandsDirective)
