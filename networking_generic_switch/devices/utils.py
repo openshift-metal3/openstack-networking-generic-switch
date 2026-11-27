@@ -101,6 +101,72 @@ def port_id_resub(port_id, port_id_re_sub):
     return port_id
 
 
+def expand_vlan_list(spec):
+    """Expand a VLAN list specification into VLAN IDs.
+
+    Expands a comma-separated list of VLAN IDs and hyphenated ranges,
+    as commonly printed by switch CLI ``show`` commands, into a list
+    of individual VLAN IDs. For example ``"1,2,100-102"`` expands to
+    ``[1, 2, 100, 101, 102]``.
+
+    :param spec: A VLAN list specification string.
+    :returns: A list of integers, empty when nothing could be parsed.
+    """
+    vlans = []
+    for part in spec.split(','):
+        part = part.strip()
+        if not part:
+            continue
+        if '-' in part:
+            try:
+                low, high = part.split('-', 1)
+                vlans.extend(range(int(low), int(high) + 1))
+            except ValueError:
+                continue
+        else:
+            try:
+                vlans.append(int(part))
+            except ValueError:
+                continue
+    return vlans
+
+
+def expand_openconfig_trunk_vlans(entries):
+    """Expand an OpenConfig trunk-vlans list into VLAN IDs.
+
+    Expands a list of VLAN IDs and ``x..y`` inclusive ranges, as
+    carried by the OpenConfig vlan-id union type in the switched-vlan
+    model, into a list of individual VLAN IDs. For example
+    ``[100, "200..202"]`` expands to ``[100, 200, 201, 202]``.
+
+    :param entries: A list of VLAN IDs (ints) and range strings, as
+                    parsed from a switched-vlan response.
+    :returns: A list of integers, empty when nothing could be parsed.
+    """
+    vlans = []
+    for entry in entries:
+        if isinstance(entry, bool) or entry is None:
+            continue
+        if isinstance(entry, int):
+            vlans.append(entry)
+            continue
+        entry = str(entry).strip()
+        if not entry:
+            continue
+        if '..' in entry:
+            try:
+                low, high = entry.split('..', 1)
+                vlans.extend(range(int(low), int(high) + 1))
+            except ValueError:
+                continue
+        else:
+            try:
+                vlans.append(int(entry))
+            except ValueError:
+                continue
+    return vlans
+
+
 def parse_vxlan_multicast_config(device_cfg):
     """Parse VXLAN multicast BUM replication configuration from device config.
 
